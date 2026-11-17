@@ -1,0 +1,1 @@
+t07: the project's OWN headers as header units: an in-tree library's public header (<mylib/api.h>, LINK_LIBRARIES of a non-imported target) and a header next to the sources ("local.h", also reached as "../local.h" from a subdirectory), mixed with STL header units; import and #include spellings.

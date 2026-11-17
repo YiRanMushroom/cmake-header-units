@@ -1,0 +1,5 @@
+#pragma once
+#include <string>
+#define MYLIB_VERSION 3
+std::string mylib_name();
+inline int mylib_inline() { return 40; }

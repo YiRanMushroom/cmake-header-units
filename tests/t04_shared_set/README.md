@@ -1,0 +1,1 @@
+t04: two consumer targets (t04_a, t04_b) share one header-unit set (each BMI is built once). Configuration must fail with a clear message for each -DT04_BAD variant: std (consumer with CXX_STANDARD 23), ext (CXX_EXTENSIONS OFF), exc (-fno-exceptions) and dup (a second set declaring <vector>, consumed by one TU together with the first).

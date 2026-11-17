@@ -1,0 +1,1 @@
+t01: STL header units only (`import <vector>; import <string>; import <iostream>;`) in a plain executable without named modules: the BMIs are built by CMake's own compile rule, ordered before the consumer's scan and compile, and used instead of textual parsing.
