@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.28...4.5)
+project(r01_dup_header LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake")
+include(HeaderUnits)
+# Minimal repro: the same header in two sets of the same directory; the consumer uses the FIRST set.
+add_header_units(hu_one HEADERS vector)
+add_header_units(hu_two HEADERS vector)
+add_executable(r01 main.cpp)
+target_import_header_units(r01 hu_one)
