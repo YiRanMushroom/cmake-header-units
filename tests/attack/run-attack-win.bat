@@ -11,8 +11,12 @@ if defined VCINSTALLDIR goto haveenv
 set "PF86=%ProgramFiles(x86)%"
 rem fallback in case ProgramFiles(x86) is not in the environment
 if not defined PF86 set "PF86=%SystemDrive%\Program Files (x86)"
-set "VSWHERE=%PF86%\Microsoft Visual Studio\Installer\vswhere.exe"
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -property installationPath`) do set "VSDIR=%%i"
+set "VSDIR="
+pushd "%PF86%\Microsoft Visual Studio\Installer" 2>nul && (
+  for /f "delims=" %%i in ('.\vswhere.exe -latest -products * -property installationPath') do set "VSDIR=%%i"
+  popd
+)
+if not defined VSDIR (echo run-attack-win.bat: Visual Studio not found; open a VS Developer prompt & exit /b 1)
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 :haveenv
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"

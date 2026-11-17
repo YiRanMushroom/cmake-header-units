@@ -239,7 +239,7 @@ in the headers could differ.
    string is not found. The string was found and replaced in both 4.4.5 and 4.5.0.
 2. **Ninja variable `$in` injected into that template (GCC).** It relies on CMake writing compile sources as
    absolute paths, or as paths relative to the top build dir when they are inside it (the wrapper handles both).
-3. **Clang PCM location.** The module assumes `<set binary dir>/CMakeFiles/<set>.dir/hu/<name><obj ext>`, i.e.
+3. **BMI location (Clang PCM and GCC CMI).** Both are the set's object file (GCC: `-fmodule-only`). The module assumes `<set binary dir>/CMakeFiles/<set>.dir/hu/<name><obj ext>`, i.e.
    CMake's default `CMAKE_INTERMEDIATE_DIR_STRATEGY=FULL` plus the public `OBJECT_NAME`. It needs this because
    `OBJECT_DEPENDS` does not accept `$<TARGET_OBJECTS>` (tried: the genex ends up literally in build.ninja). `SHORT`
    is rejected. If CMake moved the object, Ninja would stop with "missing and no known rule to make it", which is
@@ -248,24 +248,26 @@ in the headers could differ.
    statement too, and CMake's GCC scan rule passes no mapper of its own. The driver re-verifies both in build.ninja
    on every run.
 
-## Per-toolchain caveats and boundaries (measured, see tests/t06 and the t03 probe)
+## Per-toolchain caveats and boundaries (measured, see tests/t06, the t03 probe and tests/attack)
 
-t06 probe TUs each receive the `<vector>` BMI:
+t06 probe TUs each receive the `<vector>` BMI; every order builds on all three toolchains (2026-11-17):
 
 | probe TU | gcc | clang (libstdc++) | win (MSVC STL) |
 |---|---|---|---|
 | `import <vector>; #include <string>` | OK | OK | OK |
-| `#include <string>` then `import <vector>;` | OK | OK | FAIL: `cstdio:33: missing '#include <cwchar>'; '_Mbstatet' must be declared before it is used` |
-| `#include <cstdio>` then `import <vector>;` | OK | OK | FAIL (same) |
-| BMI loaded, only textual `#include <string>`, `<vector>` | OK | OK | FAIL (same) |
+| `#include <string>` then `import <vector>;` | OK | OK | OK |
+| `#include <cstdio>` then `import <vector>;` | OK | OK | OK |
+| BMI loaded, only textual `#include <string>`, `<vector>` | OK | OK | OK |
 | `import <vector>; #include <vector>` | OK | OK | OK |
-| `#include <vector>` then `import <vector>;` | OK | OK | FAIL: `xtr1common:177: unknown type name '_NODISCARD'` |
+| `#include <vector>` then `import <vector>;` | OK | OK | OK |
 
-* **gcc:** an `#include` of a header that is in the TU's map is translated into an import; others stay textual.
-  All orders work.
-* **win (Clang + MSVC STL):** a TU that receives a PCM must import first and include afterwards, and must not
-  receive PCMs it only includes textually. This is why selection is per source and sets should be small. The
-  module cannot detect a wrong order, but the compiler fails loudly.
+* **gcc:** an `#include` of a header that is in the TU's map is translated into an import; others stay textual. A
+  spelling with `..` (`#include "../x.h"`) or through a symlink/junction is a different path for GCC: `..` stays
+  textual (GCC PR 125337), a symlinked include directory fails to build (tests/attack/a08).
+* **Clang (both):** lazy named header units (module map on the real header + `-fmodule-file=<name>=<pcm>`): every
+  `#include`/`import` that resolves to the file becomes an import, in any order, and a PCM is only read by TUs that
+  reach its header. The options are passed in a per-source response file (`@...rsp`), so a TU can receive hundreds of
+  header units (Windows: CMake's scan runs through cmd.exe, 8191 characters).
 * **Clang (both):** a NON-exported `import <vector>;` inside a module interface does not make `std::vector`'s
   definition reachable for importers of that module:
   * Linux: `missing '#include <bits/stl_vector.h>'; 'vector' must be defined before it is used`
@@ -280,7 +282,6 @@ t06 probe TUs each receive the `<vector>` BMI:
   build tree are passed to the compiler relative by CMake's Ninja generator; such sets get a compiler launcher
   (`CXX_COMPILER_LAUNCHER`, public API; an existing launcher such as ccache is kept) that makes the source path absolute. The wrapper is POSIX `sh` (GCC is Linux-only here). CMIs are not reproducible with `-g`
   unless `SOURCE_DATE_EPOCH` is set.
-* **Clang:** every TU of a set receives all PCMs of that set (granularity: set x source).
 
 ## Tests
 
@@ -359,11 +360,16 @@ Nothing is UNTESTED. The one gap: Boost is not available on Windows, so t02 ther
 * GCC: exactly one header unit per header per build tree; no spaces in paths.
 * Headers inside the build tree (FetchContent `_deps/`, `configure_file` output) work (t12). Headers generated at *build*
   time (e.g. protobuf, Qt uic) do not exist at configure time and cannot be header units.
-* Clang: `CMAKE_INTERMEDIATE_DIR_STRATEGY=SHORT` is rejected. A TU gets every PCM of its sets.
-* The synthesized `m@synth_N` BMI (#28166 case) is ordered after the header units and builds. Its rebuild after
-  an external-header edit relies on its depfile plus the order-only `<set>_ready` edge; this was not separately tested.
+* `CMAKE_INTERMEDIATE_DIR_STRATEGY=SHORT` is rejected (the BMI is the object file at the default location).
+* The synthesized `m@synth_N` BMI (#28166 case) is ordered after the header units and is rebuilt in the same ninja run
+  after a header edit (tests/attack/a02): BMIs are spelled relative to the build dir in depfiles, matching Ninja's nodes.
 * PIC differences between a set and its consumers only produce a warning.
-* Sources added via generator expressions must be listed with `SOURCES`. One source file used by several targets must
-  get the same sets.
+* Sources added via generator expressions must be listed with `SOURCES`. One source file used by several targets (in one
+  or several directories) must get the same sets.
+* ABI-changing definitions on a consumer only (e.g. `-D_GLIBCXX_DEBUG`, a different MSVC runtime / iterator debug level)
+  are not checked: by the standard, macros of the importer do not affect a header unit, so the import and the textual
+  parts of that TU disagree (Linux: wrong object layout at run time; Windows: caught at link time). Put such
+  definitions on the set too (directory-wide definitions reach both).
+* Clang: the same header may be in several sets, also of one directory (a TU still receives at most one of them).
 * CMake 4.4/4.5 also scan the `import std` sources (`@cmake_cxx_std@synth_0`) in every C++20 build. This is unrelated to
   this module; on Windows it prints many `std.ixx` warnings in the build log.

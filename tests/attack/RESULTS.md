@@ -46,6 +46,36 @@ The a09 steps were chosen by the porter (no original driver): re-run cmake, dele
 After re-running cmake, the first ninja re-collates the dyndep files, because CMake rewrites CXXDependInfo.json. The driver accepts that as long as nothing is recompiled.
 Control run without the module (a plain C++20 project, CMake 4.5.0 in hu-dev): after re-running cmake, `ninja -n -d explain` shows the same `CXX.dd older than most recent input .../CXXDependInfo.json` (g++: `@cmake_cxx_std@synth_0`, clang: `c.dir`). This is CMake behaviour.
 
+## Update 2026-11-17: after the fixes (CMake 4.5.0, fresh build dirs)
+
+All six confirmed module bugs below are fixed; every scenario now behaves as expected:
+
+| scenario | gcc | clang | win |
+|---|---|---|---|
+| a01 N=25 / 35 / 60 / 250 / STL | PASS | PASS | PASS (all; was FAIL from N=35: Clang options now in a per-source response file) |
+| a02_crossdir | PASS (was FAIL: synthesized BMI now rebuilt in the same run) | PASS | PASS |
+| a03_shared_src | PASS (was FAIL) | PASS (was FAIL) | PASS (was FAIL) |
+| a04_runtime | FAIL (a04_gdbg, `_GLIBCXX_DEBUG` on the consumer only: not checked, documented) | FAIL (same) | EXPECTED-ERROR (link-time `/failifmismatch`) |
+| a05 features / extoff | PASS (was FAIL) / PASS | PASS / PASS | PASS / PASS |
+| a06_longpath | PASS | PASS | PASS |
+| a07_space (+ gcc header variant) | EXPECTED-ERROR (both) | PASS | PASS |
+| a08_junction / a08_single | FAIL / FAIL (GCC: symlinked include dir, documented) | PASS (was FAIL) / PASS | PASS (was FAIL) / PASS |
+| a09_lifecycle | PASS (was FAIL: the CMI is now the object file) | PASS | PASS |
+| a10_order / a10_oneset | EXPECTED-ERROR / PASS | PASS (was FAIL) / PASS | PASS (was FAIL) / PASS |
+| a11_two_sets (+ gcc fmtonly) | EXPECTED-ERROR, PASS | PASS (was FAIL) | PASS (was FAIL) |
+| a12_unity_pch | PASS | PASS | PASS |
+| r01_dup_header | EXPECTED-ERROR (GCC: one header unit per header) | PASS (was FAIL) | PASS (was FAIL) |
+
+Fixes (cmake/HeaderUnits.cmake): (1) Clang module names and module maps derive from the header path and a second set
+in the same directory reuses the OBJECT_NAME, so per-directory source properties no longer depend on the set;
+(2) consumer source properties are applied once per (target directory, source); (3) Clang header-unit options go into a
+per-source response file; (4)+(5) GCC: `-fmodule-only` makes the CMI the set's object file (a real Ninja output), and
+mapper files spell it relative to the build dir (`$root .`), so depfiles name the same Ninja node; (6) the consumer's
+effective standard (CXX_STANDARD, else the compiler default, raised by compile features of the target and its link
+interface) is compared instead of the raw CXX_STANDARD property.
+
+The original run follows.
+
 ## Confirmed module bugs (against sha256 cb4b158d...)
 
 1. **Clang: the same header in two sets of one directory breaks the earlier set.**
