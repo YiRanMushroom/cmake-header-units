@@ -90,7 +90,9 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
   off.
 * Only literal import declarations are recognized:
   * imports produced by macros are not;
-  * imports inside `#if` are always taken (an unused one only costs a BMI);
+  * imports inside `#if` are considered whatever the condition. A header that cannot be found with the target's include
+    paths is skipped silently (e.g. a platform header in an inactive branch; shown with `--log-level=VERBOSE`). A header
+    that exists but does not compile as a header unit in this configuration still fails the build;
   * sources added with generator expressions are not scanned.
 
 ### add_header_units

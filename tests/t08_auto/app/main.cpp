@@ -2,6 +2,9 @@ import <vector>;
 import <fmt/format.h>;
 import <mylib/api.h>;
 import "local.h";
+#ifdef HU_T08_NEVER_DEFINED
+import <hu_t08_does_not_exist.h>;   // inactive branch: must be skipped, not an error
+#endif
 int other();
 int main() {
   std::vector<int> v = local_vec();
