@@ -90,6 +90,49 @@ target_import_header_units(<consumer> <set> [SOURCES <src>...])  # default: all 
 * Keep sets small and disjoint, and give each TU only the sets it imports (see the Clang/MSVC STL boundary below).
 * Put imports before textual `#include`s.
 
+### Auto-discovery: `target_auto_header_units`
+
+```cmake
+add_executable(app main.cpp util.cpp)
+target_link_libraries(app PRIVATE mylib fmt::fmt)
+target_auto_header_units(app)      # after the sources and target_link_libraries are set
+```
+
+```
+target_auto_header_units(<target> [LINK_LIBRARIES ...] [INCLUDE_DIRECTORIES ...] [COMPILE_DEFINITIONS ...]
+                         [COMPILE_OPTIONS ...] [CXX_STANDARD <n>] [CXX_EXTENSIONS <bool>]
+                         [EXCLUDE <name>...] [NO_RECONFIGURE])
+```
+
+* Scans the target's C++ sources (including `CXX_MODULES` file sets) for `import <x>;` / `import "x";` (optionally
+  `export import`). Every imported header becomes a header unit of the target. No header lists are needed.
+* A header that already belongs to a set (declared with `add_header_units` or discovered for another target) is reused.
+  The rest go into a new set `<target>_hu`, built with the target's direct target `LINK_LIBRARIES`, `INCLUDE_DIRECTORIES`
+  and `COMPILE_DEFINITIONS` (plain values and `$<BUILD_INTERFACE:...>`), plus the extra values given.
+* `import "x";` found next to the importing source is used by absolute path, like the compiler's quote lookup.
+* The scanned sources become `CMAKE_CONFIGURE_DEPENDS`, so a new import re-runs CMake (`NO_RECONFIGURE` turns this off).
+* Not considered (by design): imports produced by macros, and imports inside `#if`. An import inside a disabled `#if`
+  only costs an unused BMI.
+* A header unit whose header itself contains an import declaration is a configure-time error
+  ("... not supported yet"), unless `HU_ALLOW_HEADER_IMPORTS` is ON (below).
+
+### Experimental: header units that import header units (`HU_ALLOW_HEADER_IMPORTS`)
+
+```cmake
+set(HU_ALLOW_HEADER_IMPORTS ON)    # before add_header_units / target_auto_header_units
+```
+
+* Headers may then contain `import <x>;` / `export import "y.h";`. Each imported header must be a header unit of some
+  set (`target_auto_header_units` adds them recursively). Imports within one set and across sets both work.
+* The importing BMI is built after the imported BMIs and rebuilt when they change (touching `b.h` rebuilds b's BMI,
+  then a's BMI, then the consumers). Consumers of a set also receive the sets it imports.
+* GCC: the importing header's own mapper lists the imported headers. Clang: the importing header's compile gets the
+  imported module maps and named `-fmodule-file=` options.
+* Use `export import` in the header if the importer should see the imported declarations (on Clang a plain
+  `import` inside a header unit is not re-exported).
+* Tested by t10 on all three toolchains. Still experimental: cycles are not diagnosed, and headers that `#include` a
+  header which is also a header unit elsewhere are not specially handled.
+
 ## Design
 
 **1. Every BMI is built by CMake's own compile rule, so the flags are exact.** Each set is an OBJECT library.
@@ -250,6 +293,10 @@ Each test is a standalone CMake project under `tests/`, with a one-line README s
 | t04_shared_set | two targets share one set; `T04_BAD=std/ext/exc/dup` (CXX_STANDARD 23, CXX_EXTENSIONS OFF, `-fno-exceptions`, header in two sets) must fail at configure time with a clear message |
 | t05_rebuild | no-op; touch a header included by the header unit; same-size edit 41->42 reaches the exe; touch the header unit's own header; `ninja -n -d explain` plus executed edges show the BMI rebuilt before the consumer |
 | t06_mixed | header unit + overlapping textual `#include` in one TU; a TU excluded via SOURCES builds textually; boundary probes |
+| t07_own_headers | the project's own headers as header units: an in-tree library header via `LINK_LIBRARIES mylib` (`$<BUILD_INTERFACE:...>`), a local header via `INCLUDE_DIRECTORIES`; `#include` of them in another TU is translated |
+| t08_auto | `target_auto_header_units`: sets generated from the imports (STL, fmt, in-tree library header, `import "local.h"` by path); a second target reuses `<vector>` and gets a new set for `<string>` |
+| t09_header_import_error | a header unit whose header contains `import <vector>;` is rejected at configure time with "not supported yet" |
+| t10_header_imports | `HU_ALLOW_HEADER_IMPORTS ON`: `a.h` does `export import <vector>; export import "b.h";` (auto, recursive), manual set with intra-set and cross-set imports; touching `b.h` rebuilds b's BMI, then a's BMI, then main.cpp |
 
 The driver `tests/run_suite.cmake` is a portable `cmake -P` script. For every test it runs:
 * a fresh configure and build (`ninja`, parallel by default), then ctest;
@@ -262,17 +309,16 @@ The driver `tests/run_suite.cmake` is a portable `cmake -P` script. For every te
 * the test-specific steps.
 
 How to run:
-* Linux, inside the container: `cd /work/proto && sh run-linux.sh`. It runs 4 combinations in parallel and takes about
-  1.5 to 4 minutes (the GCC build-order check in t02 dominates). From Windows:
-  `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-22.04 -- docker exec -w /work/proto hu-dev sh run-linux.sh`, after syncing the
-  sources to the WSL ext4 tree (`rsync -a --delete --exclude _build <proto>/ ~/hu-work/proto/`). Builds never touch `/mnt/c`.
-* Windows: `run-win.bat`. It sets up the MSVC environment and runs both CMake versions in parallel (about 3 to 4 minutes).
+* Linux: `sh run-linux.sh` runs GCC and Clang (+libstdc++) in parallel with the `cmake` on PATH (`CMAKE_EXE=...` to choose;
+  `CLANG_CXX` / `CLANG_FLAGS` default to `clang++-22` / `--gcc-toolchain=/usr/local`, matching `docker/Dockerfile`).
+  Build on a native Linux filesystem; under WSL never build on `/mnt/c`.
+* Windows: `run-win.bat` (clang++, ninja and cmake on PATH; it sets up the MSVC environment via vswhere unless it is
+  already set; `CMAKE_EXE=...` to choose CMake). Needs `ext-src/` (see Quick start).
 * Subset: `TESTS="t01;t05"`.
 
-Results go to `_build/<tc>-cmake<ver>/results.txt`, with full logs in `logs/<test>.log`. Copies of the Linux results are
-in `_build/linux/`.
+Results go to `_build/<tc>-<tag>/results.txt`, with full logs in `logs/<test>.log`.
 
-## Results (final run, fresh build directories, 2026-11-17)
+## Results (final run, fresh build directories, 2026-11-17: 60/60 PASS)
 
 | test | gcc / CMake 4.5.0 | gcc / 4.4.5 | clang+libstdc++ / 4.5.0 | clang+libstdc++ / 4.4.5 | win clang+MSVC STL / 4.5.0 | win / 4.4.5 |
 |---|---|---|---|---|---|---|
@@ -282,6 +328,10 @@ in `_build/linux/`.
 | t04_shared_set | PASS | PASS | PASS | PASS | PASS | PASS |
 | t05_rebuild | PASS | PASS | PASS | PASS | PASS | PASS |
 | t06_mixed | PASS | PASS | PASS | PASS | PASS | PASS |
+| t07_own_headers | PASS | PASS | PASS | PASS | PASS | PASS |
+| t08_auto | PASS | PASS | PASS | PASS | PASS | PASS |
+| t09_header_import_error | PASS | PASS | PASS | PASS | PASS | PASS |
+| t10_header_imports | PASS | PASS | PASS | PASS | PASS | PASS |
 
 A PASS covers every driver step above. No configure log of the final run contains a `CMake Warning` (the PIC
 warning did not fire). Recorded boundary probes, which do not affect the verdict:
@@ -295,7 +345,8 @@ Nothing is UNTESTED. The one gap: Boost is not available on Windows, so t02 ther
 * Prototype. It relies on the CMake internals listed above. Kitware considers ersatz header units unsupported.
 * Single-config Ninja only. No install/export of header-unit sets. BMIs must stay where they were built (Clang
   records PCM paths, GCC records CMI paths in importing BMIs).
-* `LINK_LIBRARIES` must be IMPORTED targets (a try_compile restriction). Wrap in-tree libraries in an INTERFACE IMPORTED target.
+* In-tree `LINK_LIBRARIES` contribute only their own `INTERFACE_INCLUDE_DIRECTORIES` / `INTERFACE_COMPILE_DEFINITIONS`
+  (plain values and `$<BUILD_INTERFACE:...>`), not those of their dependencies (non-recursive). IMPORTED targets are used as is.
 * The compatibility checks look at target and directory properties. Language flags injected another way (for example
   a linked library's `INTERFACE_COMPILE_OPTIONS -std=...` or generator expressions) are not seen at configure time.
   The compilers still reject `-std`/exception/RTTI mismatches at build time.

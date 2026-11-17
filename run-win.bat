@@ -8,8 +8,14 @@ rem located via vswhere), and fmt 10.1.1 + nlohmann_json 3.11.3 sources in ext-s
 setlocal
 set "HERE=%~dp0"
 if defined VCINSTALLDIR goto haveenv
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -property installationPath`) do set "VSDIR=%%i"
+set "PF86=%ProgramFiles(x86)%"
+if not defined PF86 set "PF86=C:\Program Files (x86)"
+set "VSDIR="
+pushd "%PF86%\Microsoft Visual Studio\Installer" 2>nul && (
+  for /f "delims=" %%i in ('.\vswhere.exe -latest -products * -property installationPath') do set "VSDIR=%%i"
+  popd
+)
+if not defined VSDIR (echo run-win.bat: Visual Studio not found; open a VS Developer prompt & exit /b 1)
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 :haveenv
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"

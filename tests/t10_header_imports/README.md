@@ -1,0 +1,1 @@
+t10: HU_ALLOW_HEADER_IMPORTS ON: header units whose headers import other header units (export import <vector>; export import "b.h";), discovered recursively by target_auto_header_units and declared manually (intra-set and cross-set imports); BMI-to-BMI build order and rebuild propagation.
