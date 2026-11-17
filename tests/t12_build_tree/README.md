@@ -1,0 +1,1 @@
+t12: headers inside the build tree as header units: a FetchContent dependency (<build>/_deps/tinydep-src) and a configure_file-generated header (<build>/gen); another TU #includes them (translated to imports).

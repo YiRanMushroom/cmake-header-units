@@ -1,0 +1,1 @@
+t11: the configure-time probe follows in-tree link interfaces recursively: mylib -> proj::core (ALIAS of an INTERFACE library with include dir + definition) -> fmt::fmt (IMPORTED), a dependency linked from another directory (::@ markers), and a PRIVATE (LINK_ONLY) dependency that must not leak.

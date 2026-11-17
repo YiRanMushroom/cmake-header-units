@@ -277,7 +277,8 @@ t06 probe TUs each receive the `<vector>` BMI:
   ... is not a constant expression"), with or without header units. tests/common/ExternalLibs.cmake defines
   `FMT_CONSTEVAL=` for the Windows `fmt::fmt` target. This is a third-party issue.
 * **GCC:** mapper files cannot contain spaces (source, header and build paths are checked). Headers inside the
-  build tree are rejected. The wrapper is POSIX `sh` (GCC is Linux-only here). CMIs are not reproducible with `-g`
+  build tree are passed to the compiler relative by CMake's Ninja generator; such sets get a compiler launcher
+  (`CXX_COMPILER_LAUNCHER`, public API; an existing launcher such as ccache is kept) that makes the source path absolute. The wrapper is POSIX `sh` (GCC is Linux-only here). CMIs are not reproducible with `-g`
   unless `SOURCE_DATE_EPOCH` is set.
 * **Clang:** every TU of a set receives all PCMs of that set (granularity: set x source).
 
@@ -297,6 +298,8 @@ Each test is a standalone CMake project under `tests/`, with a one-line README s
 | t08_auto | `target_auto_header_units`: sets generated from the imports (STL, fmt, in-tree library header, `import "local.h"` by path); a second target reuses `<vector>` and gets a new set for `<string>` |
 | t09_header_import_error | a header unit whose header contains `import <vector>;` is rejected at configure time with "not supported yet" |
 | t10_header_imports | `HU_ALLOW_HEADER_IMPORTS ON`: `a.h` does `export import <vector>; export import "b.h";` (auto, recursive), manual set with intra-set and cross-set imports; touching `b.h` rebuilds b's BMI, then a's BMI, then main.cpp |
+| t11_transitive | the configure-time header lookup follows in-tree link interfaces recursively: `mylib` -> `proj::core` (ALIAS, include dir + definition) -> `fmt::fmt` (IMPORTED), a dependency linked from another directory, and a PRIVATE (`LINK_ONLY`) dependency that must not leak |
+| t12_build_tree | headers inside the build tree as header units: a FetchContent dependency (`_deps/tinydep-src`) and a `configure_file` header; another TU `#include`s them |
 
 The driver `tests/run_suite.cmake` is a portable `cmake -P` script. For every test it runs:
 * a fresh configure and build (`ninja`, parallel by default), then ctest;
@@ -318,7 +321,7 @@ How to run:
 
 Results go to `_build/<tc>-<tag>/results.txt`, with full logs in `logs/<test>.log`.
 
-## Results (final run, fresh build directories, 2026-11-17: 60/60 PASS)
+## Results (final run, fresh build directories, 2026-11-17: 72/72 PASS)
 
 | test | gcc / CMake 4.5.0 | gcc / 4.4.5 | clang+libstdc++ / 4.5.0 | clang+libstdc++ / 4.4.5 | win clang+MSVC STL / 4.5.0 | win / 4.4.5 |
 |---|---|---|---|---|---|---|
@@ -332,6 +335,8 @@ Results go to `_build/<tc>-<tag>/results.txt`, with full logs in `logs/<test>.lo
 | t08_auto | PASS | PASS | PASS | PASS | PASS | PASS |
 | t09_header_import_error | PASS | PASS | PASS | PASS | PASS | PASS |
 | t10_header_imports | PASS | PASS | PASS | PASS | PASS | PASS |
+| t11_transitive | PASS | PASS | PASS | PASS | PASS | PASS |
+| t12_build_tree | PASS | PASS | PASS | PASS | PASS | PASS |
 
 A PASS covers every driver step above. No configure log of the final run contains a `CMake Warning` (the PIC
 warning did not fire). Recorded boundary probes, which do not affect the verdict:
@@ -345,12 +350,15 @@ Nothing is UNTESTED. The one gap: Boost is not available on Windows, so t02 ther
 * Prototype. It relies on the CMake internals listed above. Kitware considers ersatz header units unsupported.
 * Single-config Ninja only. No install/export of header-unit sets. BMIs must stay where they were built (Clang
   records PCM paths, GCC records CMI paths in importing BMIs).
-* In-tree `LINK_LIBRARIES` contribute only their own `INTERFACE_INCLUDE_DIRECTORIES` / `INTERFACE_COMPILE_DEFINITIONS`
-  (plain values and `$<BUILD_INTERFACE:...>`), not those of their dependencies (non-recursive). IMPORTED targets are used as is.
+* Header lookup at configure time (try_compile) follows in-tree `LINK_LIBRARIES` recursively through `INTERFACE_LINK_LIBRARIES`
+  (ALIAS resolved, `$<LINK_ONLY:>` skipped, `$<BUILD_INTERFACE:x>` used); other generator expressions in those properties are
+  skipped, which only matters if the probe then fails (loudly). The real BMI compile uses CMake's normal usage requirements.
 * The compatibility checks look at target and directory properties. Language flags injected another way (for example
   a linked library's `INTERFACE_COMPILE_OPTIONS -std=...` or generator expressions) are not seen at configure time.
   The compilers still reject `-std`/exception/RTTI mismatches at build time.
-* GCC: exactly one header unit per header per build tree; no spaces in paths; headers inside the build tree are rejected.
+* GCC: exactly one header unit per header per build tree; no spaces in paths.
+* Headers inside the build tree (FetchContent `_deps/`, `configure_file` output) work (t12). Headers generated at *build*
+  time (e.g. protobuf, Qt uic) do not exist at configure time and cannot be header units.
 * Clang: `CMAKE_INTERMEDIATE_DIR_STRATEGY=SHORT` is rejected. A TU gets every PCM of its sets.
 * The synthesized `m@synth_N` BMI (#28166 case) is ordered after the header units and builds. Its rebuild after
   an external-header edit relies on its depfile plus the order-only `<set>_ready` edge; this was not separately tested.
