@@ -1,0 +1,18 @@
+# The commands come first; everything their header units depend on is set afterwards in this file.
+add_executable(t16 main.cpp other.cpp)
+target_header_units_scan_sources(t16 main.cpp)
+add_executable(t16b b.cpp)
+target_auto_header_units(t16b)
+
+add_compile_definitions(T16_DIR_DEF=3)
+add_library(t16_dep INTERFACE)
+target_include_directories(t16_dep INTERFACE dep_inc)
+target_compile_definitions(t16_dep INTERFACE T16_DEP_DEF=4)
+target_link_libraries(t16 PRIVATE t16_dep)
+target_include_directories(t16 PRIVATE inc)
+if(MSVC)
+  target_compile_options(t16 PRIVATE /fp:fast)
+else()
+  target_compile_options(t16 PRIVATE -ffast-math -Wall)
+endif()
+target_include_directories(t16b PRIVATE binc)

@@ -31,7 +31,7 @@ Not supported: clang-cl, libc++, multi-config generators with GCC/Clang, MSVC wi
    find_package(fmt REQUIRED)
    add_executable(app main.cpp util.cpp)
    target_link_libraries(app PRIVATE fmt::fmt)
-   target_auto_header_units(app)         # after the target's sources and target_link_libraries()
+   target_auto_header_units(app)         # anywhere after add_executable() in this CMakeLists.txt
    ```
 
 3. In the sources:
@@ -91,8 +91,12 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
 * A header that already belongs to a set is reused, whether it was declared or discovered for another target. Reuse
   is decided by the file the name resolves to with this target's include paths, not by the name: `<config.h>` from two
   different include directories gives two header units, `<vector>` (the same file) one. The others go into a new set
-  `<target>_hu`. It is built with the target's own include directories, compile definitions,
-  link libraries (targets), standard and extensions, plus the values given here.
+  `<target>_hu`. It is built with the target's own include directories, compile definitions, compile options (except
+  warning options), link libraries (targets), standard and extensions, plus the values given here. Generator
+  expressions in those properties are not copied (`$<BUILD_INTERFACE:...>` include directories are).
+* The scan runs at the end of the `CMakeLists.txt` that calls the command (`cmake_language(DEFER)`), so the target's
+  sources and settings may come after the command in the same file. A change made later from another directory, e.g.
+  `target_link_libraries(<target> ...)` in a parent directory, is not seen; configure reports it with a warning.
 * `import "x";` found next to the importing source is used by absolute path, like the compiler's quote lookup.
 * The scanned sources become `CMAKE_CONFIGURE_DEPENDS`, so adding an import re-runs CMake. `NO_RECONFIGURE` turns this
   off.
@@ -271,7 +275,7 @@ cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
-tests/t01..t15/                  test projects; tests/run_suite.cmake is the driver
+tests/t01..t16/                  test projects; tests/run_suite.cmake is the driver
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
@@ -300,6 +304,7 @@ Each test is a standalone CMake project with a one-line README:
 | t13_same_name | two targets whose `<config.h>` are different files get one header unit each; `<vector>` (same file) is shared |
 | t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
 | t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
+| t16_deferred | both commands written before the target's settings in the same file: link library, include directories, directory definition and compile options all reach the header units; a later change from the parent directory is reported |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -328,7 +333,7 @@ How to run:
 
 ## Results (2026-11-17, fresh build directories)
 
-GCC/Clang suite: **90/90 PASS**, i.e. t01-t15 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
+GCC/Clang suite: **96/96 PASS**, i.e. t01-t16 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
 The last column is the MSVC pass-through (`run-msvc.bat`: MSVC 19.44, Visual Studio 17 2022, CMake 4.5.0; configure,
 build and ctest only).
 
@@ -349,6 +354,7 @@ build and ctest only).
 | t13_same_name | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | t14_textual_pragma | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | t15_scan_sources | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| t16_deferred | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A

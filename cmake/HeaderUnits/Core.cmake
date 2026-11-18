@@ -26,6 +26,13 @@ function(add_header_units set)
   set(probe_libs ${U_LIBS})
   set(probe_incs ${A_INCLUDE_DIRECTORIES} ${U_INCS})
   set(probe_defs ${A_COMPILE_DEFINITIONS} ${U_DEFS})
+  # The set's real compile also gets this directory's COMPILE_DEFINITIONS (add_compile_definitions); try_compile does not.
+  get_property(dirdefs DIRECTORY PROPERTY COMPILE_DEFINITIONS)
+  foreach(d IN LISTS dirdefs)
+    if(NOT d MATCHES "\\$<")
+      list(APPEND probe_defs "${d}")
+    endif()
+  endforeach()
   # Language level of the set (consumers must match exactly: GCC and Clang reject -std mismatches).
   if(DEFINED A_CXX_STANDARD)
     set(std "${A_CXX_STANDARD}")
@@ -188,10 +195,7 @@ function(add_header_units set)
     set_property(GLOBAL PROPERTY _HU_REAL_SET_${k} ${set})
   endforeach()
 
-  get_property(sets GLOBAL PROPERTY _HU_SETS)
-  if(NOT sets)
-    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _hu_finalize)
-  endif()
+  _hu_schedule_finalize()
   set_property(GLOBAL APPEND PROPERTY _HU_SETS ${set})
   set_property(GLOBAL PROPERTY _HU_SET_${set}_HEADERS "${A_HEADERS}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_PATHS "${rpaths}")
@@ -248,7 +252,17 @@ function(target_import_header_units consumer set)
 endfunction()
 
 # Runs at the end of the top-level directory: all targets and their sources are known.
+# _hu_finalize runs once, at the end of the top-level directory.
+function(_hu_schedule_finalize)
+  get_property(done GLOBAL PROPERTY _HU_FINALIZE_SCHEDULED)
+  if(NOT done)
+    set_property(GLOBAL PROPERTY _HU_FINALIZE_SCHEDULED ON)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _hu_finalize)
+  endif()
+endfunction()
+
 function(_hu_finalize)
+  _hu_auto_finish()
   get_property(tc GLOBAL PROPERTY _HU_TC)
   get_property(hudir GLOBAL PROPERTY _HU_DIR)
   # Manifest for tools/tests: set|header name|resolved path|BMI
