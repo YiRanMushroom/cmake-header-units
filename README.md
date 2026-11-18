@@ -58,6 +58,12 @@ The header units (BMIs) are built before the sources that need them and passed t
 `#include` of the same header is served from the header unit too (Clang always; GCC when spelled the same way), so you
 can switch from `#include` to `import` file by file.
 
+To limit this to some sources, list them instead (their imports only; the target's other sources are untouched):
+
+```cmake
+target_header_units_scan_sources(app main.cpp)
+```
+
 For explicit control over which headers become header units and with which flags, declare sets:
 
 ```cmake
@@ -96,6 +102,22 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
     paths is skipped silently (e.g. a platform header in an inactive branch; shown with `--log-level=VERBOSE`). A header
     that exists but does not compile as a header unit in this configuration still fails the build;
   * sources added with generator expressions are not scanned.
+
+### target_header_units_scan_sources
+
+```
+target_header_units_scan_sources(<target> <src>... [same options as target_auto_header_units])
+```
+
+The same as `target_auto_header_units`, but only for the listed sources:
+
+* only they are scanned for imports, and only they receive header units. The target's other sources are left alone:
+  their `#include`s stay textual, and an `import` in them does not compile;
+* paths are relative to the current source directory. A file that is not a C++ source of the target is a
+  configure-time error;
+* it can be called several times for one target: headers that already have a header unit are reused, the rest go into
+  `<target>_hu`, `<target>_hu_2`, ...;
+* only the listed sources become `CMAKE_CONFIGURE_DEPENDS`.
 
 ### add_header_units
 
@@ -249,7 +271,7 @@ cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
-tests/t01..t14/                  test projects; tests/run_suite.cmake is the driver
+tests/t01..t15/                  test projects; tests/run_suite.cmake is the driver
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
@@ -277,6 +299,7 @@ Each test is a standalone CMake project with a one-line README:
 | t12_build_tree | headers inside the build tree: a FetchContent dependency and a `configure_file` header |
 | t13_same_name | two targets whose `<config.h>` are different files get one header unit each; `<vector>` (same file) is shared |
 | t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
+| t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -305,7 +328,7 @@ How to run:
 
 ## Results (2026-11-17, fresh build directories)
 
-GCC/Clang suite: **84/84 PASS**, i.e. t01-t14 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
+GCC/Clang suite: **90/90 PASS**, i.e. t01-t15 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
 The last column is the MSVC pass-through (`run-msvc.bat`: MSVC 19.44, Visual Studio 17 2022, CMake 4.5.0; configure,
 build and ctest only).
 
@@ -325,6 +348,7 @@ build and ctest only).
 | t12_build_tree | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | t13_same_name | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | t14_textual_pragma | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| t15_scan_sources | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A

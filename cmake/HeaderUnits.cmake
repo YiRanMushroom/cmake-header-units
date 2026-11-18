@@ -9,6 +9,7 @@
 #   target_auto_header_units(<target> [LINK_LIBRARIES ...] [INCLUDE_DIRECTORIES ...] [COMPILE_DEFINITIONS ...]
 #                            [COMPILE_OPTIONS ...] [CXX_STANDARD <n>] [CXX_EXTENSIONS <bool>] [EXCLUDE <name>...]
 #                            [NO_RECONFIGURE])
+#   target_header_units_scan_sources(<target> <src>... [same options as target_auto_header_units])
 #   set(HU_ALLOW_HEADER_IMPORTS ON)   # experimental: header units whose headers import header units
 #
 # Toolchains:

@@ -1,0 +1,1 @@
+t15: target_header_units_scan_sources: only the listed sources are scanned and get header units (two calls for one target, the second reusing the first set); an unlisted source keeps a textual #include configured by a macro; listing a file that is not a source of the target is a configure error.
