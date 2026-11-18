@@ -141,8 +141,8 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
   directories where CMake puts a target's `-I` and `-isystem` directories; a target's list is that list with its own
   directories in their places. So the number of compiler runs follows the number of distinct option sets (usually
   one to three), not the number of targets; configure prints it. Nothing is compiled at configure time. A
-  configure-time self-check (two more runs) stops the configure if the compiler finds or names headers otherwise than
-  this predicts. A header found only through a directory given as an unevaluable generator expression is not found:
+  configure-time self-check (one more run, with the options of the first lookup) stops the configure if the compiler
+  finds or names headers otherwise than this predicts; if its probe cannot run, it only warns. A header found only through a directory given as an unevaluable generator expression is not found:
   pass that directory with `INCLUDE_DIRECTORIES`.
 * `LINK_LIBRARIES` supplies include directories and definitions, from imported or in-tree targets. In-tree link
   interfaces are followed recursively: ALIAS targets are resolved, private (`$<LINK_ONLY:>`) dependencies are not
@@ -335,9 +335,9 @@ Each test is a standalone CMake project with a one-line README:
 | t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
 | t16_deferred | both commands written before the target's settings in the same file: link library, include directories, directory definition and compile options all reach the header units; a later change from the parent directory is reported |
 | t17_lookup | the header lookup follows the compiler's search list: the first `-I` directory wins over a later one and over `-isystem` (an imported target's); an include directory spelled with `..`; `-isystem` in `CMAKE_CXX_FLAGS` and, in a Release build, in `CMAKE_CXX_FLAGS_RELEASE` (in Debug that import is in an inactive `#ifdef` and its header is not found: skipped); `CMAKE_INCLUDE_CURRENT_DIR`; the C++ library's directory given again with `-I`; (not on Windows) a directory reached through a symbolic link; with GCC 16, C++26 and `-freflection`; an IDE-style probe of the header-unit flags (`-E`, no `-M`); a source at a long path |
-| t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`) |
+| t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`); both list a directory that does not exist first |
 | t19_scale | 5 and 40 targets, each with its own include directory and header: the number of compiler runs for the lookup is the same |
-| t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files |
+| t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -379,7 +379,9 @@ build directories): t01-t20 **60/60 PASS** on GCC 16.2 and Clang 22 + libstdc++ 
 MSVC STL (Windows, CMake 4.5.0). MinGW-w64 GCC 16.1 (`TC=mingw`, CMake 4.5.0): 17 PASS and the 3 known failures
 (XFAIL): t12_build_tree cannot pass there (see Limitations); t02_thirdparty (link: multiple definitions in fmt) and
 t08_auto (second build not a no-op: fmt's self-include becomes a self-import) fail the same way as before. t19_scale:
-5 and 40 targets both take 3 compiler runs at configure time (one lookup run plus the self-check's two).
+5 and 40 targets both take 2 compiler runs at configure time (one lookup run plus the self-check). The full suites
+ran before the last review fixes (a missing first include directory, the self-check's options, auto mode's order);
+the tests they touch (t04, t08, t13, t16-t20) were rerun after them on all four toolchains, same verdicts.
 
 Earlier the same day, the header lookup without `try_compile`: configure time of t02_thirdparty (3 sets) on Windows
 with MinGW went from 11.7 s to 1.9 s, of which 1.4 s is CMake's own compiler detection.

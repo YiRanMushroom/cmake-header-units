@@ -1,7 +1,7 @@
 +++
 title = "Header lookup: one -E -v per option set, each target's list assembled in CMake, self-check; GCC keys per consumer"
 keys = [ "configure time", "gcc", "lookup", "search list", "spelling", "try_compile" ]
-updated = "2026-11-18 23:02:19"
+updated = "2026-11-18 23:13:42"
 checked = "2026-11-18"
 
 [[items]]
@@ -30,7 +30,7 @@ snippet = "function(_hu_gcc_keys out p name)"
 
 [[items]]
 name = "self-check"
-value = "Finalize, 2 runs without project flags: -E -H of a probe (shadowed header via sub/../inc vs -isystem, -isystem-only header, <cstddef>) must open the predicted files (GCC: under a key), else FATAL. Probe headers need distinct contents: GCC's #pragma once merges same-content files."
+value = "Finalize, 1 run with the first lookup's options: -E -H of a probe (header via sub/../inc shadowing -isystem, -isystem-only one, <cstddef>); a file other than predicted (GCC: a name not among the keys) is FATAL, a header not opened only warns. Probe headers need distinct contents (GCC #pragma once)."
 path = "cmake/HeaderUnits/Common.cmake"
 snippet = "function(_hu_self_check)"
 
@@ -39,5 +39,11 @@ name = "same-file"
 value = "A consumer finding, for a header of its sets, another file without a header unit gets a WARNING (t20); a reused set bringing another <config.h> is fine (t13)."
 path = "cmake/HeaderUnits/Common.cmake"
 snippet = "function(_hu_check_same_files consumer)"
+
+[[items]]
+name = "auto-order"
+value = "Auto passes the set the target's dirs/libs first, then the call's extras (the order _hu_target_search uses); after add_header_units a guard FATALs if the set resolved a name to another file than the target. Missing dirs are skipped before the parallel lists (no empty placeholders)."
+path = "cmake/HeaderUnits/Auto.cmake"
+snippet = "# The set looks its headers up from its own target: it must find the files this target finds."
 +++
 <name> is resolved in the search list of a target as CMake compiles it, first match; one function reads the context for every caller (set lookup, auto requests, finalize checks). The compiler runs once per distinct option set, never per target (user requirement: no try_compile, no per-target compiles, configure cost not growing with the project; t19_scale asserts 5 and 40 targets give the same count, printed as STATUS "header lookup: <n> compiler run(s)"). An empty-file try_compile to capture flags was tried and rejected (works, but +0.6 s per config and parsing Ninja's log). Identity is the real path everywhere (_HU_REAL_SET_<md5>). Details per item.
