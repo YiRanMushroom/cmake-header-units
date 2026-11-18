@@ -134,8 +134,11 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
                  [CXX_STANDARD <n>] [CXX_EXTENSIONS <bool>] [POSITION_INDEPENDENT_CODE <bool>])
 ```
 
-* `<name>` is the header as written in `import <name>;`. It is resolved exactly like the compiler resolves
-  `#include <name>` with the set's flags, by a configure-time `try_compile` probe.
+* `<name>` is the header as written in `import <name>;`. It is resolved in the compiler's own include search list
+  for the set's flags (`<compiler> <flags> -x c++ -E -v`: `-I` directories, then `-isystem` ones such as an imported
+  target's, then the compiler's), first match. One cheap compiler run per distinct set of flags; nothing is compiled
+  at configure time. A header found only through a directory given as an unevaluable generator expression is not
+  found: pass that directory with `INCLUDE_DIRECTORIES`.
 * `LINK_LIBRARIES` supplies include directories and definitions, from imported or in-tree targets. In-tree link
   interfaces are followed recursively: ALIAS targets are resolved, private (`$<LINK_ONLY:>`) dependencies are not
   followed.
@@ -206,14 +209,18 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * Consumers get per-source options plus `OBJECT_DEPENDS` on the BMIs. CMake applies both to the dependency-scan
   statement and to the compile statement of the source, so the BMIs are built before CMake's own module scan.
 * A `<set>_ready` target orders the BMI targets that CMake synthesizes for cross-target named-module imports.
-* Everything happens at configure time: targets, source properties, mapper files and the probe. A deferred call
-  finalizes after all CMakeLists have run.
+* Everything happens at configure time: targets, source properties, mapper files and the header lookup (one
+  `-E -v` compiler run per distinct set of flags, about 0.1 s). A deferred call finalizes after all CMakeLists have
+  run.
 * BMI paths are spelled relative to the build directory, so compiler depfiles name the same Ninja nodes and an edit
   rebuilds everything that depends on it in one `ninja` run.
 
 **GCC** (`cmake/HeaderUnits/GCC.cmake`):
 
-* A header unit is identified by the header's resolved path.
+* A header unit is identified by the header's resolved path. GCC names it by its own spelling of that path, which
+  the mapper is keyed by: the normalized path (system directories, and everything on Windows), an `-I` directory as
+  given plus the name (GCC on Linux keeps `dir/../inc/x.h`), and the real path (a symbolic link). The mapper files
+  list all of these for the same BMI.
 * Each BMI is built with `-fmodule-only` through a mapper that lists only that header, so BMIs do not depend on build
   order.
 * Each consumer source gets a mapper (`g++-mapper-server`) listing its header units. GCC also translates `#include`s of
@@ -263,10 +270,15 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * GCC:
   * one header unit per header per build tree;
   * no spaces in source, header or build paths;
-  * inconsistent include spellings (`..`, symlinks) are not recognized;
+  * an include directory that a consumer spells differently from the set (`/x/include` for the set,
+    `/x/src/../include` for the consumer) is not recognized: GCC names the header by the consumer's spelling. Auto
+    mode builds sets from the target's own directories and is not affected;
   * on Windows (MinGW-w64), a header that resolves inside the build tree (a FetchContent dependency, a `configure_file`
     header) cannot be a header unit yet: configure stops with an error, because the launcher for such headers is a
-    POSIX shell script. t12_build_tree cannot pass there for this reason.
+    POSIX shell script. t12_build_tree cannot pass there for this reason;
+  * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
+    reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
+    predates the header lookup without `try_compile` (same failure with the earlier code).
 * The consumer/set compatibility check reads target and directory properties. Flags that only exist at generate time
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
@@ -280,7 +292,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
 ```
 cmake/HeaderUnits.cmake          entry point: include(HeaderUnits)
 cmake/HeaderUnits/Core.cmake     add_header_units, target_import_header_units, finalization
-cmake/HeaderUnits/Common.cmake   header probe, import scanning, usage requirements, compatibility check
+cmake/HeaderUnits/Common.cmake   header lookup, import scanning, usage requirements, compatibility check
 cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
@@ -309,12 +321,13 @@ Each test is a standalone CMake project with a one-line README:
 | t08_auto | `target_auto_header_units`: sets generated from imports; a second target reuses them |
 | t09_header_import_error | a header containing `import` is rejected ("not supported yet") |
 | t10_header_imports | `HU_ALLOW_HEADER_IMPORTS`: headers importing header units (auto and manual, within and across sets), rebuild propagation |
-| t11_transitive | the header probe follows in-tree link interfaces recursively (ALIAS, imported, cross-directory, `LINK_ONLY`) |
+| t11_transitive | the header lookup follows in-tree link interfaces recursively (ALIAS, imported, cross-directory, `LINK_ONLY`) |
 | t12_build_tree | headers inside the build tree: a FetchContent dependency and a `configure_file` header |
 | t13_same_name | two targets whose `<config.h>` are different files get one header unit each; `<vector>` (same file) is shared |
 | t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
 | t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
 | t16_deferred | both commands written before the target's settings in the same file: link library, include directories, directory definition and compile options all reach the header units; a later change from the parent directory is reported |
+| t17_lookup | the header lookup follows the compiler's search list: the first `-I` directory wins over a later one and over `-isystem` (an imported target's); an include directory spelled with `..`; (not on Windows) a directory reached through a symbolic link |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -349,9 +362,18 @@ How to run:
 * Adversarial scenarios: `tests/attack/run-attack-linux.sh` and `tests/attack/run-attack-win.bat`; results are in
   `tests/attack/RESULTS.md`.
 
-## Results (2026-11-17, fresh build directories)
+## Results
 
-GCC/Clang suite: **96/96 PASS**, i.e. t01-t16 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
+**2026-11-18, after the header lookup without `try_compile`** (fresh build directories): t01-t17 **51/51 PASS** on
+GCC 16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64
+GCC 16.1 (`TC=mingw`, CMake 4.5.0): 14/17. t12_build_tree cannot pass there (see Limitations); t02_thirdparty (link:
+multiple definitions in fmt) and t08_auto (second build not a no-op: fmt's self-include becomes a self-import) fail the
+same way with the earlier code. Configure time of t02_thirdparty (3 sets) on Windows with MinGW: 11.7 s before,
+1.9 s after, of which 1.4 s is CMake's own compiler detection.
+
+The table is the run before that change (2026-11-17, fresh build directories).
+
+GCC/Clang suite then: **96/96 PASS**, i.e. t01-t16 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
 The last column is the MSVC pass-through (`run-msvc.bat`: MSVC 19.44, Visual Studio 17 2022, CMake 4.5.0; configure,
 build and ctest only).
 
@@ -377,11 +399,6 @@ build and ctest only).
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A
 project without HeaderUnits.cmake shows the same: `#include <fmt/format.h>` links, `import <fmt/format.h>;` does not.
-
-MinGW-w64 GCC 16.1 on Windows (`TC=mingw`, CMake 4.5.0, 2026-11-18): t01_stl, t07_own_headers, t13_same_name,
-t14_textual_pragma and t16_deferred PASS. The other tests have not been run with MinGW yet; t12_build_tree cannot pass
-there (see Limitations). After the Windows changes, t01_stl and t16_deferred also passed again with GCC 16.2 on Linux
-(CMake 4.4.5).
 
 Adversarial scenarios (`tests/attack/RESULTS.md`): after the fixes every scenario behaves as expected on all three
 toolchains. The remaining failures are the documented limitations: consumer-only `_GLIBCXX_DEBUG` (a04), and on GCC

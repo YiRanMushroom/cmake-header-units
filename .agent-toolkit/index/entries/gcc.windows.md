@@ -1,7 +1,7 @@
 +++
 title = "GCC on Windows (MinGW-w64): how header units are mapped without a POSIX shell, and why"
 keys = [ "crlf", "gcc", "mapper", "max_path", "mingw", "windows" ]
-updated = "2026-11-18 21:17:30"
+updated = "2026-11-18 22:01:11"
 checked = "2026-11-18"
 
 [[links]]
@@ -24,3 +24,4 @@ Ninja on Windows starts commands with CreateProcess (no /bin/sh), so the consume
 - Every mapper file must be written NEWLINE_STYLE UNIX: GCC's mapper-file reader keeps the \r of CRLF as part of the CMI path, and every header unit then fails with "unknown compiled module interface: no such module".
 - Map files have short names (gcc/<md5-16>.map, s/<md5-16>.map listed in src-index.txt, which the .cmd reads): a name built from the source path passed 260 characters and did not open.
 - A header inside the build tree is a FATAL_ERROR on Windows (it needs gcc-abs-src.sh), so t12_build_tree cannot pass with TC=mingw.
+- Open on MinGW, both also with the older try_compile code: t02_thirdparty fails to link (fmt's function-local static arrays in inline functions: multiple definition between the header unit and #include in another TU); t08_auto's second build is not a no-op: fmt/format.h includes format-inl.h, which includes "format.h" again, and GCC on Windows translates that self-include into an import of the header's own CMI, so the depfile lists the CMI as its own input (ninja: dependency cycle). On Linux GCC recognizes the self-include.

@@ -123,6 +123,31 @@ function(_hu_gcc_src_map out hudir src)
   endif()
 endfunction()
 
+# The mapper keys of header path <p> found for name <name> (see _hu_GCC_add_header), recorded for the consumers' maps.
+function(_hu_gcc_keys out p name)
+  set(keys "${p}")
+  file(REAL_PATH "${p}" rp)
+  list(APPEND keys "${rp}")
+  string(LENGTH "${p}" lp)
+  string(LENGTH "/${name}" ln)
+  if(NOT IS_ABSOLUTE "${name}" AND lp GREATER ln)
+    math(EXPR at "${lp} - ${ln}")
+    string(SUBSTRING "${p}" ${at} -1 tail)
+    string(SUBSTRING "${p}" 0 ${at} dir)
+    if(tail STREQUAL "/${name}")
+      string(MD5 dk "${dir}")
+      get_property(raws GLOBAL PROPERTY _HU_RAWDIRS_${dk})
+      foreach(r IN LISTS raws)
+        list(APPEND keys "${r}/${name}")
+      endforeach()
+    endif()
+  endif()
+  list(REMOVE_DUPLICATES keys)
+  string(MD5 pk "${p}")
+  set_property(GLOBAL PROPERTY _HU_GCC_KEYS_${pk} "${keys}")
+  set(${out} "${keys}" PARENT_SCOPE)
+endfunction()
+
 # add_header_units(), per header: in: set, h, p (resolved path), oname, hudir; appends cmis, hmaps, maplines.
 macro(_hu_GCC_add_header)
     # GCC: a header unit's identity is the path string; CMake passes the source as this absolute path.
@@ -162,11 +187,19 @@ macro(_hu_GCC_add_header)
     else()
       set(hmap "${hudir}/gcc/${set}/${oname}.map")
     endif()
+    # GCC names a header unit by its own spelling of the path, and the mapper is keyed by it: the normalized path
+    # (system directories; everything on Windows), an -I directory as given plus the name (GCC on Linux keeps
+    # "dir/../inc/x.h"), the real path (a symbolic link, an 8.3 name).  All of them are listed, for the same CMI.
+    _hu_gcc_keys(hkeys "${p}" "${h}")
+    set(keys "")
+    foreach(kk IN LISTS hkeys)
+      string(APPEND keys "${kk} ${rcmi}\n")
+    endforeach()
     # Isolation: the header's own build sees a mapper that lists only itself, so GCC does not translate the
     # #includes inside it into imports of other header units -> CMI content independent of build order.
-    file(CONFIGURE OUTPUT "${hmap}" CONTENT "$root .\n${p} ${rcmi}\n" NEWLINE_STYLE UNIX)
+    file(CONFIGURE OUTPUT "${hmap}" CONTENT "$root .\n${keys}" NEWLINE_STYLE UNIX)
     list(APPEND hmaps "${hmap}")
-    string(APPEND maplines "${p} ${rcmi}\n")
+    string(APPEND maplines "${keys}")
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
@@ -229,7 +262,14 @@ macro(_hu_GCC_consumer_options)
           continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
         endif()
         file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
-        string(APPEND content "${p} ${rc}\n")
+        string(MD5 pk "${p}")
+        get_property(pkeys GLOBAL PROPERTY _HU_GCC_KEYS_${pk})
+        if(NOT pkeys)
+          set(pkeys "${p}")
+        endif()
+        foreach(kk IN LISTS pkeys)
+          string(APPEND content "${kk} ${rc}\n")
+        endforeach()
         list(APPEND deps "${cmi}")
       endforeach()
     endforeach()

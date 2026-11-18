@@ -25,13 +25,12 @@ include_guard(GLOBAL)
 if(NOT CMAKE_CXX_COMPILER_LOADED)
   message(FATAL_ERROR "HeaderUnits: include it after project() with the CXX language enabled.")
 endif()
-set(_HU_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/HeaderUnits")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   if(CMAKE_VERSION VERSION_LESS 3.28)
     message(FATAL_ERROR "HeaderUnits: CMake >= 3.28 is required (C++20 module scanning with MSBuild).")
   endif()
-  include("${_HU_MODULE_DIR}/MSVC.cmake")
+  include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/MSVC.cmake")
   return()
 endif()
 
@@ -61,7 +60,13 @@ set(_HU_DIR "${CMAKE_BINARY_DIR}/CMakeFiles/header_units")
 set_property(GLOBAL PROPERTY _HU_TC "${_HU_TC}")
 set_property(GLOBAL PROPERTY _HU_DIR "${_HU_DIR}")
 
-include("${_HU_MODULE_DIR}/Common.cmake")
-include("${_HU_MODULE_DIR}/${_HU_TC}.cmake")     # GCC.cmake or Clang.cmake: toolchain setup and strategy macros
-include("${_HU_MODULE_DIR}/Core.cmake")
-include("${_HU_MODULE_DIR}/Auto.cmake")
+# Spelled with CMAKE_CURRENT_LIST_DIR (not a variable of our own) so that IDEs which follow include() (CLion's CMake
+# completion) find the commands defined in these files.
+include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Common.cmake")
+if(_HU_TC STREQUAL "GCC")      # toolchain setup and strategy macros
+  include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/GCC.cmake")
+else()
+  include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Clang.cmake")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Core.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Auto.cmake")
