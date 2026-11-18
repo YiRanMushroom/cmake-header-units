@@ -252,24 +252,18 @@ function(_hu_auto_run i)
   endif()
 
   # A name that cannot be found with the target's include paths is skipped: typically an import in an inactive #if
-  # branch (a platform-specific header).  If such an import is active after all, the compiler reports it.
-  # the language level the set will get (add_header_units: CXX_STANDARD, else CMAKE_CXX_STANDARD; same for extensions)
-  set(sstd "${CMAKE_CXX_STANDARD}")
+  # branch (a platform-specific header).  If such an import is active after all, the compiler reports it.  The search
+  # list is the target's own (_hu_target_search), with this call's extra INCLUDE_DIRECTORIES / LINK_LIBRARIES /
+  # COMPILE_OPTIONS and language level.
+  set(ov)
   if(DEFINED A_CXX_STANDARD)
-    set(sstd "${A_CXX_STANDARD}")
-  elseif(tstd)
-    set(sstd "${tstd}")
+    list(APPEND ov STD "${A_CXX_STANDARD}")
   endif()
   if(DEFINED A_CXX_EXTENSIONS)
-    _hu_bool(sext "${A_CXX_EXTENSIONS}")
-  elseif(NOT text STREQUAL "text-NOTFOUND" AND DEFINED text)
-    _hu_bool(sext "${text}")
-  elseif(DEFINED CMAKE_CXX_EXTENSIONS)
-    _hu_bool(sext "${CMAKE_CXX_EXTENSIONS}")
-  else()
-    _hu_bool(sext "${CMAKE_CXX_EXTENSIONS_DEFAULT}")
+    list(APPEND ov EXT "${A_CXX_EXTENSIONS}")
   endif()
-  _hu_set_search_dirs(search STD "${sstd}" EXT "${sext}" INCS ${incs} LIBS ${libs} OPTS ${opts})
+  _hu_target_search(S ${tgt} ${ov} INCS ${A_INCLUDE_DIRECTORIES} LIBS ${A_LINK_LIBRARIES} OPTS ${A_COMPILE_OPTIONS})
+  set(search ${S_DIRS})
   set(kept)
   foreach(n IN LISTS names)
     _hu_find_header(cand "${n}" ${search})

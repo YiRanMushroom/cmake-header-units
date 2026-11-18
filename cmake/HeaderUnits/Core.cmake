@@ -41,31 +41,6 @@ function(add_header_units set)
       "(the module needs to know where the header-unit BMIs, i.e. the set's object files, are written).")
   endif()
 
-  # Each header's file: the first match in the compiler's include search list for the set's flags (_hu_search_dirs).
-  _hu_set_search_dirs(search STD ${std} EXT ${ext} INCS ${A_INCLUDE_DIRECTORIES} LIBS ${A_LINK_LIBRARIES}
-                      OPTS ${A_COMPILE_OPTIONS})
-  set(paths)
-  foreach(h IN LISTS A_HEADERS)
-    _hu_find_header(p "${h}" ${search})
-    if(NOT p)
-      string(JOIN "\n  " shown ${search})
-      message(FATAL_ERROR "add_header_units(${set}): <${h}> is not found in the include search list of the set's flags "
-        "(INCLUDE_DIRECTORIES, the usage requirements of LINK_LIBRARIES, COMPILE_OPTIONS, the compiler's own):\n  ${shown}")
-    endif()
-    _hu_scan_imports(imps "${p}")
-    if(imps AND NOT HU_ALLOW_HEADER_IMPORTS)
-      set(shown "${imps}")
-      list(TRANSFORM shown REPLACE "^a\\|(.*)$" "import <\\1>")
-      list(TRANSFORM shown REPLACE "^q\\|(.*)$" "import \"\\1\"")
-      string(JOIN ", " shown ${shown})
-      message(FATAL_ERROR "add_header_units(${set}): header <${h}> ('${p}') contains ${shown}. Import declarations "
-        "inside headers are not supported yet: use #include in headers (inside a TU that receives the header units, "
-        "a #include of a header unit is turned into an import automatically), or set HU_ALLOW_HEADER_IMPORTS ON "
-        "(experimental: header units that import other header units).")
-    endif()
-    list(APPEND paths "${p}")
-  endforeach()
-
   add_library(${set} OBJECT)
   # Ordering anchor: a utility target that is complete only when every BMI of the set is built.  Consumers
   # depend on it, so their object-order phony (and that of any BMI target CMake synthesizes from them for
@@ -93,6 +68,33 @@ function(add_header_units set)
     _hu_bool(pic "${CMAKE_POSITION_INDEPENDENT_CODE}")
   endif()
   set_target_properties(${set} PROPERTIES POSITION_INDEPENDENT_CODE ${pic})
+
+  # Each header's file: the first match in the set's include search list, read from the set target as CMake will
+  # compile it (with what its directory adds: include_directories(), add_compile_options(), CMAKE_INCLUDE_CURRENT_DIR).
+  _hu_target_search(S ${set})
+  set(search ${S_DIRS})
+  set(paths)
+  foreach(h IN LISTS A_HEADERS)
+    _hu_find_header(p "${h}" ${search})
+    if(NOT p)
+      string(JOIN "\n  " shown ${search})
+      message(FATAL_ERROR "add_header_units(${set}): <${h}> is not found in the include search list of the set's flags "
+        "(the set's include directories, those of its directory and of its LINK_LIBRARIES, the compiler's own):\n  ${shown}")
+    endif()
+    _hu_scan_imports(imps "${p}")
+    if(imps AND NOT HU_ALLOW_HEADER_IMPORTS)
+      set(shown "${imps}")
+      list(TRANSFORM shown REPLACE "^a\\|(.*)$" "import <\\1>")
+      list(TRANSFORM shown REPLACE "^q\\|(.*)$" "import \"\\1\"")
+      string(JOIN ", " shown ${shown})
+      message(FATAL_ERROR "add_header_units(${set}): header <${h}> ('${p}') contains ${shown}. Import declarations "
+        "inside headers are not supported yet: use #include in headers (inside a TU that receives the header units, "
+        "a #include of a header unit is turned into an import automatically), or set HU_ALLOW_HEADER_IMPORTS ON "
+        "(experimental: header units that import other header units).")
+    endif()
+    list(APPEND paths "${p}")
+  endforeach()
+
 
   set(cmis)
   set(rpaths)
@@ -157,6 +159,7 @@ function(add_header_units set)
   set_property(GLOBAL PROPERTY _HU_SET_${set}_STD "${std}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_EXT "${ext}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+  set_property(GLOBAL PROPERTY _HU_SET_${set}_SEARCH "${search}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_PIC "${pic}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_OPTS "${A_COMPILE_OPTIONS}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_MAPLINES "${maplines}")
@@ -217,6 +220,15 @@ function(_hu_schedule_finalize)
 endfunction()
 
 function(_hu_finalize)
+  _hu_finalize_run()
+  get_property(runs GLOBAL PROPERTY _HU_LOOKUP_RUNS)
+  if(NOT runs)
+    set(runs 0)
+  endif()
+  message(STATUS "HeaderUnits: header lookup: ${runs} compiler run(s) (one per distinct set of options, not per target)")
+endfunction()
+
+function(_hu_finalize_run)
   _hu_auto_finish()
   get_property(tc GLOBAL PROPERTY _HU_TC)
   get_property(hudir GLOBAL PROPERTY _HU_DIR)
@@ -294,6 +306,7 @@ function(_hu_finalize)
     get_property(s GLOBAL PROPERTY _HU_REQ_${i}_SET)
     get_property(all GLOBAL PROPERTY _HU_REQ_${i}_ALL)
     _hu_check_compat(${t} ${s})
+    _hu_check_same_files(${t} ${s})
     if(all)
       _hu_target_cxx_sources(srcs ${t})
     else()
