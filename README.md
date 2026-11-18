@@ -13,6 +13,9 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 | Clang 22 + libstdc++ 16 (Linux) | Ninja | this module |
 | Clang 22 (`clang++`, GNU-style driver) + MSVC STL (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Visual Studio 17 2022 | MSBuild (the commands do nothing) |
+| MinGW-w64 GCC 16.1 + libstdc++ (Windows) | Ninja | this module |
+
+MinGW-w64 GCC is so far tested with CMake 4.5.0 and a part of the suite only (see Results).
 
 Not supported: clang-cl, libc++, multi-config generators with GCC/Clang, MSVC with Ninja.
 
@@ -219,6 +222,9 @@ defined before the include take effect. Use it for the one source of an stb-styl
   header-unit map together.
 * Headers inside the build tree are compiled through a small launcher that passes an absolute path. It uses the public
   `CXX_COMPILER_LAUNCHER` property and keeps an existing launcher such as ccache.
+* On Windows (MinGW-w64) there is no `/bin/sh`, so the consumer mapper is a generated `gcc-mapper.cmd` run through
+  `cmd /c`; it finds the source's map in `src-index.txt`. Mapper files get short hashed names, because paths past 260
+  characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
 **Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
 
@@ -239,7 +245,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
 **CMake internals relied upon** (unsupported; grep `CMAKE-INTERNAL` in `cmake/`):
 
 1. GCC: the `CMAKE_CXX_MODULE_MAP_FLAG` override, with Ninja's `$in` injected into it. The module stops with an error if
-   a CMake release changes the template.
+   a CMake release changes the template. On Windows the override also names CMake's module map as `$out.modmap`
+   (observed: the object path plus `.modmap`), since CMake spells `<MODULE_MAP_FILE>` with backslashes there.
 2. The object location `<set binary dir>/CMakeFiles/<set>.dir/<OBJECT_NAME><ext>`, i.e. the default
    `CMAKE_INTERMEDIATE_DIR_STRATEGY` (`SHORT` is rejected). If CMake moved objects, Ninja would stop with "missing and no
    known rule": a loud failure, never a silent misbuild.
@@ -256,7 +263,10 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * GCC:
   * one header unit per header per build tree;
   * no spaces in source, header or build paths;
-  * inconsistent include spellings (`..`, symlinks) are not recognized.
+  * inconsistent include spellings (`..`, symlinks) are not recognized;
+  * on Windows (MinGW-w64), a header that resolves inside the build tree (a FetchContent dependency, a `configure_file`
+    header) cannot be a header unit yet: configure stops with an error, because the launcher for such headers is a
+    POSIX shell script. t12_build_tree cannot pass there for this reason.
 * The consumer/set compatibility check reads target and directory properties. Flags that only exist at generate time
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
@@ -326,6 +336,14 @@ How to run:
   git clone --depth 1 --branch 10.1.1 https://github.com/fmtlib/fmt.git ext-src/fmt
   git clone --depth 1 --branch v3.11.3 https://github.com/nlohmann/json.git ext-src/nlohmann_json
   ```
+* Windows, MinGW-w64 GCC: no runner script yet. With the MinGW `bin` directory (which also serves the test
+  executables' runtime DLLs), ninja and cmake on PATH:
+
+  ```
+  cmake -DTC=mingw -DMINGW_CXX=C:/mingw64/bin/g++.exe -DCMAKE_EXE=<cmake under test> -DTAG=local -P tests/run_suite.cmake
+  ```
+
+  `MINGW_CXX` defaults to `g++`; the results land in `_build/mingw-local/results.txt`.
 * Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest with a Visual Studio generator; t04 and t09 are
   skipped.
 * Adversarial scenarios: `tests/attack/run-attack-linux.sh` and `tests/attack/run-attack-win.bat`; results are in
@@ -359,6 +377,11 @@ build and ctest only).
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A
 project without HeaderUnits.cmake shows the same: `#include <fmt/format.h>` links, `import <fmt/format.h>;` does not.
+
+MinGW-w64 GCC 16.1 on Windows (`TC=mingw`, CMake 4.5.0, 2026-11-18): t01_stl, t07_own_headers, t13_same_name,
+t14_textual_pragma and t16_deferred PASS. The other tests have not been run with MinGW yet; t12_build_tree cannot pass
+there (see Limitations). After the Windows changes, t01_stl and t16_deferred also passed again with GCC 16.2 on Linux
+(CMake 4.4.5).
 
 Adversarial scenarios (`tests/attack/RESULTS.md`): after the fixes every scenario behaves as expected on all three
 toolchains. The remaining failures are the documented limitations: consumer-only `_GLIBCXX_DEBUG` (a04), and on GCC
