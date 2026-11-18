@@ -42,7 +42,8 @@ function(add_header_units set)
   endif()
 
   # Each header's file: the first match in the compiler's include search list for the set's flags (_hu_search_dirs).
-  _hu_set_search_dirs(search INCS ${A_INCLUDE_DIRECTORIES} LIBS ${A_LINK_LIBRARIES} OPTS ${A_COMPILE_OPTIONS})
+  _hu_set_search_dirs(search STD ${std} EXT ${ext} INCS ${A_INCLUDE_DIRECTORIES} LIBS ${A_LINK_LIBRARIES}
+                      OPTS ${A_COMPILE_OPTIONS})
   set(paths)
   foreach(h IN LISTS A_HEADERS)
     _hu_find_header(p "${h}" ${search})

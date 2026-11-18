@@ -9,14 +9,22 @@ include_guard(GLOBAL)
 # here:" list, -I directories first, then -isystem ones, then its own), and the first directory holding <name> is the
 # file.  One cheap compiler run per distinct set of flags (shared within the configure run); nothing is compiled.
 #
-# The search list for CMAKE_CXX_FLAGS (and the build type's), sysroot / target / external toolchain, INCS as -I,
+# The search list for CMAKE_CXX_FLAGS (and the build type's), sysroot / target / external toolchain, the language
+# level (STD, EXT: some options are refused without it, e.g. GCC's -freflection without -std=c++26), INCS as -I,
 # SYSINCS as -isystem (imported targets and SYSTEM directories, as CMake passes them) and OPTS ("SHELL:" items
 # split).  Directories come out normalized (forward slashes, no "." / ".."), the spelling used for header paths; a
 # directory the compiler spells otherwise (an -I directory given with "..") is also recorded with its spelling
 # (_HU_RAWDIRS_<md5 of the normalized directory>).
 function(_hu_search_dirs out)
-  cmake_parse_arguments(PARSE_ARGV 1 A "" "" "INCS;SYSINCS;OPTS")
+  cmake_parse_arguments(PARSE_ARGV 1 A "" "STD;EXT" "INCS;SYSINCS;OPTS")
   separate_arguments(args NATIVE_COMMAND "${CMAKE_CXX_FLAGS}")
+  if(A_STD)
+    if(A_EXT AND DEFINED CMAKE_CXX${A_STD}_EXTENSION_COMPILE_OPTION)
+      list(APPEND args ${CMAKE_CXX${A_STD}_EXTENSION_COMPILE_OPTION})
+    elseif(DEFINED CMAKE_CXX${A_STD}_STANDARD_COMPILE_OPTION)
+      list(APPEND args ${CMAKE_CXX${A_STD}_STANDARD_COMPILE_OPTION})
+    endif()
+  endif()
   if(CMAKE_BUILD_TYPE)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" cfg)
     separate_arguments(cf NATIVE_COMMAND "${CMAKE_CXX_FLAGS_${cfg}}")
@@ -56,7 +64,7 @@ function(_hu_search_dirs out)
     execute_process(COMMAND "${CMAKE_CXX_COMPILER}" ${args} -x c++ -E -v "${f}"
                     OUTPUT_QUIET ERROR_VARIABLE err RESULT_VARIABLE rc)
     string(REPLACE "\r" "" err "${err}")
-    set(raw "${err}")
+    set(output "${err}")
     string(REPLACE ";" "\\;" err "${err}")
     string(REPLACE "\n" ";" lines "${err}")
     set(dirs)
@@ -85,10 +93,16 @@ function(_hu_search_dirs out)
         endif()
       endif()
     endforeach()
-    if(NOT rc EQUAL 0 OR NOT dirs)
-      string(JOIN " " shown ${args})
+    # The list is printed before the compiler looks at the (empty) source: an option refused later (exit code not 0)
+    # does not change it, and the real compile reports that option anyway.
+    string(JOIN " " shown ${args})
+    if(NOT dirs)
       message(FATAL_ERROR "HeaderUnits: no include search list from '${CMAKE_CXX_COMPILER} ${shown} -x c++ -E -v' "
-        "(exit ${rc}):\n${raw}")
+        "(exit ${rc}):\n${output}")
+    endif()
+    if(NOT rc EQUAL 0)
+      message(VERBOSE "HeaderUnits: '${CMAKE_CXX_COMPILER} ${shown} -x c++ -E -v' exited with ${rc}; its search list is "
+        "used:\n${output}")
     endif()
     list(REMOVE_DUPLICATES dirs)
     set_property(GLOBAL PROPERTY _HU_SEARCH_${k} "${dirs}")
@@ -99,9 +113,9 @@ endfunction()
 
 # The search list of a set or a target's auto request: INCS, OPTS and the usage requirements of LIBS.
 function(_hu_set_search_dirs out)
-  cmake_parse_arguments(PARSE_ARGV 1 A "" "" "INCS;LIBS;OPTS")
+  cmake_parse_arguments(PARSE_ARGV 1 A "" "STD;EXT" "INCS;LIBS;OPTS")
   _hu_collect_usage(U ${A_LIBS})
-  _hu_search_dirs(d INCS ${A_INCS} ${U_INCS} SYSINCS ${U_SYSINCS} OPTS ${A_OPTS} ${U_OPTS})
+  _hu_search_dirs(d STD "${A_STD}" EXT "${A_EXT}" INCS ${A_INCS} ${U_INCS} SYSINCS ${U_SYSINCS} OPTS ${A_OPTS} ${U_OPTS})
   set(${out} "${d}" PARENT_SCOPE)
 endfunction()
 

@@ -21,6 +21,11 @@ if(NOT CMAKE_HOST_WIN32)
   target_include_directories(t17 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/linked")
   target_compile_definitions(t17 PRIVATE T17_LINKED=1)
 endif()
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  # an option the compiler refuses without the right -std: the lookup runs with the set's language level
+  set_target_properties(t17 PROPERTIES CXX_STANDARD 26)
+  target_compile_options(t17 PRIVATE -freflection)
+endif()
 target_auto_header_units(t17)
 
 enable_testing()
