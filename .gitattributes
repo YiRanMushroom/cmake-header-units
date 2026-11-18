@@ -1,0 +1,2 @@
+# Shell scripts run on Linux (and in Docker from a Windows checkout): always LF, whatever core.autocrlf says.
+*.sh text eol=lf
