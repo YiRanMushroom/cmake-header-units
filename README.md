@@ -21,14 +21,25 @@ Not supported: clang-cl, libc++, multi-config generators with GCC/Clang, MSVC wi
 
 ## Quick start
 
-1. Copy `cmake/HeaderUnits.cmake` and the `cmake/HeaderUnits/` directory into your project.
+1. Get the module with FetchContent from the `release` branch, which holds only `cmake/` and the license (as in
+   step 2), or copy `cmake/HeaderUnits.cmake` and the `cmake/HeaderUnits/` directory into your project. To work on
+   the module itself, configure with `-DFETCHCONTENT_SOURCE_DIR_CMAKE_HEADER_UNITS=<a local checkout>`: FetchContent
+   then uses that directory instead of downloading.
 2. In the top-level `CMakeLists.txt`:
 
    ```cmake
    cmake_minimum_required(VERSION 3.28...4.5)
    project(app LANGUAGES CXX)
    set(CMAKE_CXX_STANDARD 20)
-   list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+   include(FetchContent)
+   FetchContent_Declare(cmake_header_units
+     GIT_REPOSITORY https://github.com/YiRanMushroom/cmake-header-units.git
+     GIT_TAG        release               # a branch or tag; for a commit hash, drop GIT_SHALLOW
+     GIT_SHALLOW    TRUE)
+   FetchContent_MakeAvailable(cmake_header_units)
+   list(APPEND CMAKE_MODULE_PATH "${cmake_header_units_SOURCE_DIR}/cmake")
+   # (with a copy instead: list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake"))
    include(HeaderUnits)                  # after project(), before any add_subdirectory()
 
    find_package(fmt REQUIRED)
@@ -306,10 +317,22 @@ cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 tests/t01..t16/                  test projects; tests/run_suite.cmake is the driver
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
+tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
+tools/release-README.md          the `release` branch's README
 run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
 docker/                          the Linux toolchain image used for development (GCC 16, Clang 22, fmt, json, Boost)
 docs/REPORT.md                   research report (in Chinese): CMake's position, compiler behaviour, prior art
+```
+
+## Release branch
+
+`release` holds only `cmake/`, `LICENSE` and a short README (`tools/release-README.md`), so FetchContent downloads
+just the module. Each of its commits names the main commit its files come from. To publish the module of a main commit:
+
+```sh
+cmake -P tools/update_release_branch.cmake            # from HEAD; or -DFROM=<commit> before -P
+git push origin release
 ```
 
 ## Tests
