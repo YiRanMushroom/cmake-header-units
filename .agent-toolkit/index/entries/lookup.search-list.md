@@ -1,16 +1,43 @@
 +++
-title = "Header lookup without try_compile: the compiler's -E -v search list, first match; GCC mapper keys for every spelling"
+title = "Header lookup: one -E -v per option set, each target's list assembled in CMake, self-check; GCC keys per consumer"
 keys = [ "configure time", "gcc", "lookup", "search list", "spelling", "try_compile" ]
-updated = "2026-11-18 22:01:10"
+updated = "2026-11-18 23:02:19"
 checked = "2026-11-18"
 
-[[links]]
+[[items]]
+name = "context"
+value = "Target properties: CMAKE_INCLUDE_CURRENT_DIR, INCLUDE_DIRECTORIES (incl. include_directories()), LINK_LIBRARIES usage requirements, COMPILE_OPTIONS (incl. add_compile_options()), CXX_STANDARD/EXTENSIONS. add_header_units creates the set target first."
 path = "cmake/HeaderUnits/Common.cmake"
-snippet = "function(_hu_search_dirs out)"
+snippet = "function(_hu_target_search p tgt)"
 
-[[links]]
+[[items]]
+name = "base-run"
+value = "Key: ARG1, CMAKE_CXX_FLAGS(+_<CFG>), sysroot/target/toolchain, the -std option (GCC refuses -freflection without it), options except -W/-D/-U/-O/-g. No include dirs: marker dirs -I mI -isystem mS stand for them. A printed list is used whatever the exit code."
+path = "cmake/HeaderUnits/Common.cmake"
+snippet = "function(_hu_search_base p)"
+
+[[items]]
+name = "assembly"
+value = "The target's -I/-isystem dirs go at the markers (CMake's rule: $DEFINES $INCLUDES $FLAGS); implicit dirs, missing dirs, repeats (first stays, by real path) and -I copies of system dirs are dropped."
+path = "cmake/HeaderUnits/Common.cmake"
+snippet = "function(_hu_search_list p)"
+
+[[items]]
+name = "gcc-keys"
+value = "GCC names a header unit by its spelling (Linux keeps -I dirs as given, MinGW normalizes all). Keys come from the writing compile's own list: first dir holding <name>, if the same file: its spelling+\"/name\", normalized; always p and real path (t18)."
 path = "cmake/HeaderUnits/GCC.cmake"
 snippet = "function(_hu_gcc_keys out p name)"
+
+[[items]]
+name = "self-check"
+value = "Finalize, 2 runs without project flags: -E -H of a probe (shadowed header via sub/../inc vs -isystem, -isystem-only header, <cstddef>) must open the predicted files (GCC: under a key), else FATAL. Probe headers need distinct contents: GCC's #pragma once merges same-content files."
+path = "cmake/HeaderUnits/Common.cmake"
+snippet = "function(_hu_self_check)"
+
+[[items]]
+name = "same-file"
+value = "A consumer finding, for a header of its sets, another file without a header unit gets a WARNING (t20); a reused set bringing another <config.h> is fine (t13)."
+path = "cmake/HeaderUnits/Common.cmake"
+snippet = "function(_hu_check_same_files consumer)"
 +++
-A set's headers (and an auto request's names) are resolved in the include search list the compiler prints for the set's flags ("<compiler> <flags> -x c++ -E -v": -I dirs, then -isystem ones such as imported targets', then its own), first match; one compiler run per distinct flag set, about 0.1 s. It replaced a try_compile probe per set, ~3.3 s each on Windows, which made configure grow with the number of targets (the user decided: no try_compile at all; test the toolchains instead).
-GCC keys header units by its own spelling of the path, which differs by platform: on Linux an -I directory as given is kept ("x/sys/../first/shadow.h"), system directories come normalized even though -v prints them with "../.."; on Windows (MinGW) everything is normalized. So the mapper files list the normalized path, the real path, and each raw -v spelling of the directory plus the name (_HU_RAWDIRS_*), all for the same CMI; GCC accepts a CMI built under another spelling. Not covered: a consumer whose own -I spelling differs from the set's (explicit add_header_units). t17_lookup tests the order, ".." and a symlink.
+<name> is resolved in the search list of a target as CMake compiles it, first match; one function reads the context for every caller (set lookup, auto requests, finalize checks). The compiler runs once per distinct option set, never per target (user requirement: no try_compile, no per-target compiles, configure cost not growing with the project; t19_scale asserts 5 and 40 targets give the same count, printed as STATUS "header lookup: <n> compiler run(s)"). An empty-file try_compile to capture flags was tried and rejected (works, but +0.6 s per config and parsing Ninja's log). Identity is the real path everywhere (_HU_REAL_SET_<md5>). Details per item.

@@ -134,11 +134,16 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
                  [CXX_STANDARD <n>] [CXX_EXTENSIONS <bool>] [POSITION_INDEPENDENT_CODE <bool>])
 ```
 
-* `<name>` is the header as written in `import <name>;`. It is resolved in the compiler's own include search list
-  for the set's flags (`<compiler> <flags> -x c++ -E -v`: `-I` directories, then `-isystem` ones such as an imported
-  target's, then the compiler's), first match. One cheap compiler run per distinct set of flags; nothing is compiled
-  at configure time. A header found only through a directory given as an unevaluable generator expression is not
-  found: pass that directory with `INCLUDE_DIRECTORIES`.
+* `<name>` is the header as written in `import <name>;`. It is resolved in the search list the compiler uses for the
+  set's target, first match: its `-I` directories (with those of `include_directories()` and
+  `CMAKE_INCLUDE_CURRENT_DIR`), then `-isystem` ones such as an imported target's, then the compiler's own. The
+  compiler reports its own list (`<compiler> <flags> -x c++ -E -v`) once per distinct set of options, with two marker
+  directories where CMake puts a target's `-I` and `-isystem` directories; a target's list is that list with its own
+  directories in their places. So the number of compiler runs follows the number of distinct option sets (usually
+  one to three), not the number of targets; configure prints it. Nothing is compiled at configure time. A
+  configure-time self-check (two more runs) stops the configure if the compiler finds or names headers otherwise than
+  this predicts. A header found only through a directory given as an unevaluable generator expression is not found:
+  pass that directory with `INCLUDE_DIRECTORIES`.
 * `LINK_LIBRARIES` supplies include directories and definitions, from imported or in-tree targets. In-tree link
   interfaces are followed recursively: ALIAS targets are resolved, private (`$<LINK_ONLY:>`) dependencies are not
   followed.
@@ -197,8 +202,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * **ABI-changing definitions** such as `_GLIBCXX_DEBUG` or the MSVC runtime and iterator debug level must reach the set
   too; directory-wide definitions do. By the standard, definitions on a consumer do not affect a header unit it
   imports, and a difference that exists only on the consumer is not detected.
-* **GCC:** a header can be in only one set per build tree, and include spellings must be consistent. A spelling with
-  `..` (`#include "../x.h"`) stays textual; a symlinked include directory fails to build.
+* **GCC:** a header can be in only one set per build tree. A `#include` that reaches it by another path than the
+  consumer's include path (`#include "../x.h"`) stays textual.
 
 ## How it works
 
@@ -210,17 +215,18 @@ defined before the include take effect. Use it for the one source of an stb-styl
   statement and to the compile statement of the source, so the BMIs are built before CMake's own module scan.
 * A `<set>_ready` target orders the BMI targets that CMake synthesizes for cross-target named-module imports.
 * Everything happens at configure time: targets, source properties, mapper files and the header lookup (one
-  `-E -v` compiler run per distinct set of flags, about 0.1 s). A deferred call finalizes after all CMakeLists have
-  run.
+  `-E -v` compiler run per distinct set of options, about 0.1 s each, plus the self-check). A deferred call finalizes
+  after all CMakeLists have run. The header units themselves are compiled at build time, by Ninja.
 * BMI paths are spelled relative to the build directory, so compiler depfiles name the same Ninja nodes and an edit
   rebuilds everything that depends on it in one `ninja` run.
 
 **GCC** (`cmake/HeaderUnits/GCC.cmake`):
 
-* A header unit is identified by the header's resolved path. GCC names it by its own spelling of that path, which
-  the mapper is keyed by: the normalized path (system directories, and everything on Windows), an `-I` directory as
-  given plus the name (GCC on Linux keeps `dir/../inc/x.h`), and the real path (a symbolic link). The mapper files
-  list all of these for the same BMI.
+* A header unit is identified by the header's real path. GCC names it by its own spelling of the path, which the
+  mapper is keyed by. Each mapper file is written from its compile's own search list: the spelling of the directory
+  where that compile finds the header (an `-I` directory as given: GCC on Linux keeps `dir/../inc/x.h`; system
+  directories, and everything on Windows, normalized), the normalized path and the real path (a symbolic link), all
+  for the same BMI. So a consumer that spells an include directory differently from the set gets its own spelling.
 * Each BMI is built with `-fmodule-only` through a mapper that lists only that header, so BMIs do not depend on build
   order.
 * Each consumer source gets a mapper (`g++-mapper-server`) listing its header units. GCC also translates `#include`s of
@@ -270,15 +276,16 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * GCC:
   * one header unit per header per build tree;
   * no spaces in source, header or build paths;
-  * an include directory that a consumer spells differently from the set (`/x/include` for the set,
-    `/x/src/../include` for the consumer) is not recognized: GCC names the header by the consumer's spelling. Auto
-    mode builds sets from the target's own directories and is not affected;
   * on Windows (MinGW-w64), a header that resolves inside the build tree (a FetchContent dependency, a `configure_file`
     header) cannot be a header unit yet: configure stops with an error, because the launcher for such headers is a
     POSIX shell script. t12_build_tree cannot pass there for this reason;
   * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
     reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
     predates the header lookup without `try_compile` (same failure with the earlier code).
+* A consumer whose include path finds, for a header of its sets, another file that has no header unit gets a
+  configure warning: an import of that header fails to compile (a `#include` of it stays textual).
+* The lookup takes a target's own `target_include_directories(SYSTEM ...)` directory for an `-I` one (CMake does not
+  expose the difference at configure time); it matters only if a later `-I` directory has a header of the same name.
 * The consumer/set compatibility check reads target and directory properties. Flags that only exist at generate time
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
@@ -327,7 +334,10 @@ Each test is a standalone CMake project with a one-line README:
 | t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
 | t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
 | t16_deferred | both commands written before the target's settings in the same file: link library, include directories, directory definition and compile options all reach the header units; a later change from the parent directory is reported |
-| t17_lookup | the header lookup follows the compiler's search list: the first `-I` directory wins over a later one and over `-isystem` (an imported target's); an include directory spelled with `..`; (not on Windows) a directory reached through a symbolic link |
+| t17_lookup | the header lookup follows the compiler's search list: the first `-I` directory wins over a later one and over `-isystem` (an imported target's); an include directory spelled with `..`; `-isystem` in `CMAKE_CXX_FLAGS` and, in a Release build, in `CMAKE_CXX_FLAGS_RELEASE` (in Debug that import is in an inactive `#ifdef` and its header is not found: skipped); `CMAKE_INCLUDE_CURRENT_DIR`; the C++ library's directory given again with `-I`; (not on Windows) a directory reached through a symbolic link; with GCC 16, C++26 and `-freflection`; an IDE-style probe of the header-unit flags (`-E`, no `-M`); a source at a long path |
+| t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`) |
+| t19_scale | 5 and 40 targets, each with its own include directory and header: the number of compiler runs for the lookup is the same |
+| t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -364,12 +374,15 @@ How to run:
 
 ## Results
 
-**2026-11-18, after the header lookup without `try_compile`** (fresh build directories): t01-t17 **51/51 PASS** on
-GCC 16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64
-GCC 16.1 (`TC=mingw`, CMake 4.5.0): 14/17. t12_build_tree cannot pass there (see Limitations); t02_thirdparty (link:
-multiple definitions in fmt) and t08_auto (second build not a no-op: fmt's self-include becomes a self-import) fail the
-same way with the earlier code. Configure time of t02_thirdparty (3 sets) on Windows with MinGW: 11.7 s before,
-1.9 s after, of which 1.4 s is CMake's own compiler detection.
+**2026-11-18, after the lookup rework** (one compiler run per option set, the self-check, GCC keys per consumer; fresh
+build directories): t01-t20 **60/60 PASS** on GCC 16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ +
+MSVC STL (Windows, CMake 4.5.0). MinGW-w64 GCC 16.1 (`TC=mingw`, CMake 4.5.0): 17 PASS and the 3 known failures
+(XFAIL): t12_build_tree cannot pass there (see Limitations); t02_thirdparty (link: multiple definitions in fmt) and
+t08_auto (second build not a no-op: fmt's self-include becomes a self-import) fail the same way as before. t19_scale:
+5 and 40 targets both take 3 compiler runs at configure time (one lookup run plus the self-check's two).
+
+Earlier the same day, the header lookup without `try_compile`: configure time of t02_thirdparty (3 sets) on Windows
+with MinGW went from 11.7 s to 1.9 s, of which 1.4 s is CMake's own compiler detection.
 
 The table is the run before that change (2026-11-17, fresh build directories).
 
