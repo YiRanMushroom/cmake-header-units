@@ -170,9 +170,11 @@ macro(_hu_GCC_add_header)
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
-      # -fdeps-format=p1689r5: without it GCC's -MD depfile gets make rules for module names
-      # ("<hdr>.c++-module: <cmi>", .PHONY) that Ninja records as never-existing inputs (always dirty).
-      COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;-fmodule-mapper=${hmap};-fdeps-format=p1689r5")
+      # -Mno-modules: without it GCC's -MD depfile gets make rules for module names ("<hdr>.c++-module: <cmi>",
+      # .PHONY) that Ninja records as never-existing inputs (always dirty).  Not -fdeps-format=p1689r5, which does the
+      # same here but makes a compile without -M fail ("to generate dependencies you must specify either '-M' or
+      # '-MM'"), as IDEs run these flags to read the compiler's settings (CLion).
+      COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;-fmodule-mapper=${hmap};-Mno-modules")
     list(APPEND cmis "${cmi}")
 endmacro()
 
