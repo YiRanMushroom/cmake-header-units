@@ -149,9 +149,8 @@ endfunction()
 # The search list of a target: the base list with INCS at @I and SYSINCS at @S, arranged as CMake and the compiler
 # do: a given directory that is one of the compiler's implicit ones is dropped (CMake leaves it out of the command
 # line); a missing directory is dropped; a directory listed again is dropped (the first stays; compared by real
-# path); a -I directory that is also a system directory is dropped from the -I part.  Outputs <p>_DIRS (normalized) and <p>_RAW
-# (as spelled: the given directory, or the compiler's), and records differing spellings for GCC's mapper keys
-# (_HU_RAWDIRS_<md5 of the normalized directory>).
+# path); a -I directory that is also a system directory is dropped from the -I part.  Outputs <p>_DIRS (normalized) and
+# <p>_RAW (as spelled: the given directory, or the compiler's; GCC names a header by it, _hu_gcc_keys).
 function(_hu_search_list p)
   cmake_parse_arguments(PARSE_ARGV 1 A "" "DIR;STD;EXT" "INCS;SYSINCS;OPTS")
   _hu_search_base(B DIR "${A_DIR}" STD "${A_STD}" EXT "${A_EXT}" OPTS ${A_OPTS})
@@ -217,13 +216,6 @@ function(_hu_search_list p)
     list(APPEND kept "${rp}")
     list(APPEND dirs "${n}")
     list(APPEND raws "${r}")
-    if(NOT r STREQUAL n)
-      string(MD5 dk "${n}")
-      get_property(known GLOBAL PROPERTY _HU_RAWDIRS_${dk})
-      if(NOT r IN_LIST known)
-        set_property(GLOBAL APPEND PROPERTY _HU_RAWDIRS_${dk} "${r}")
-      endif()
-    endif()
   endforeach()
   set(${p}_DIRS "${dirs}" PARENT_SCOPE)
   set(${p}_RAW "${raws}" PARENT_SCOPE)
@@ -340,27 +332,33 @@ function(_hu_find_header out name)
   set(${out} "${r}" PARENT_SCOPE)
 endfunction()
 
-# Header unit lookup by import name (angle name, or absolute path for a quote import found next to the importer):
-# outputs set, resolved path, BMI, (Clang) module name and module map; set is "" if no set provides it.
+# Header unit lookup by import name (angle name, or absolute path for a quote import found next to the importer),
+# resolved with the search list given as the remaining arguments: outputs set, resolved path, BMI, (Clang) module
+# name and module map; set is "" if no set has a header unit of that file.
 function(_hu_lookup prefix name)
-  string(MD5 k "${name}")
-  get_property(t GLOBAL PROPERTY _HU_NAME_SET_${k})
-  if(NOT t AND IS_ABSOLUTE "${name}")
-    get_property(t GLOBAL PROPERTY _HU_PATH_SET_${k})
+  _hu_find_header(f "${name}" ${ARGN})
+  set(t "")
+  if(f)
+    file(REAL_PATH "${f}" rf)
+    string(MD5 k "${rf}")
+    get_property(t GLOBAL PROPERTY _HU_REAL_SET_${k})
   endif()
   set(${prefix}_SET "${t}" PARENT_SCOPE)
   if(NOT t)
     return()
   endif()
-  get_property(hs GLOBAL PROPERTY _HU_SET_${t}_HEADERS)
   get_property(ps GLOBAL PROPERTY _HU_SET_${t}_PATHS)
   get_property(bs GLOBAL PROPERTY _HU_SET_${t}_CMIS)
   get_property(ms GLOBAL PROPERTY _HU_SET_${t}_MIDS)
   get_property(mm GLOBAL PROPERTY _HU_SET_${t}_MMAPS)
-  list(FIND hs "${name}" idx)
-  if(idx LESS 0)
-    list(FIND ps "${name}" idx)
-  endif()
+  set(idx 0)
+  foreach(p IN LISTS ps)
+    file(REAL_PATH "${p}" rp)
+    if(rp STREQUAL rf)
+      break()
+    endif()
+    math(EXPR idx "${idx} + 1")
+  endforeach()
   list(GET ps ${idx} p)
   list(GET bs ${idx} b)
   set(${prefix}_PATH "${p}" PARENT_SCOPE)
@@ -536,28 +534,42 @@ function(_hu_target_cxx_sources out tgt)
   set(${out} "${res}" PARENT_SCOPE)
 endfunction()
 
-# The consumer must find each header of the set as the same file: its own include path decides what
-# "#include <h>" / "import <h>" opens, and the set's BMI is of the set's file.  A header the consumer does not find at
-# all is left alone (it cannot use it either).
-function(_hu_check_same_files consumer set)
+# A consumer's own include path decides which file "#include <h>" / "import <h>" opens.  Warns when the consumer
+# receives a header unit for <h> of another file than the one it finds, and that file has no header unit among the
+# sets it receives (an import of <h> would fail; a #include stays textual).  A consumer that also has a header unit
+# of its own file is fine (e.g. a reused set brings another <config.h>, unused here).
+function(_hu_check_same_files consumer)
   _hu_target_search(C ${consumer})
-  get_property(hs GLOBAL PROPERTY _HU_SET_${set}_HEADERS)
-  get_property(ps GLOBAL PROPERTY _HU_SET_${set}_PATHS)
+  set(covered)
+  set(hl)
+  set(pl)
+  set(sl)
+  foreach(s IN LISTS ARGN)
+    get_property(hs GLOBAL PROPERTY _HU_SET_${s}_HEADERS)
+    get_property(ps GLOBAL PROPERTY _HU_SET_${s}_PATHS)
+    foreach(h p IN ZIP_LISTS hs ps)
+      file(REAL_PATH "${p}" rp)
+      list(APPEND covered "${rp}")
+      list(APPEND hl "${h}")
+      list(APPEND pl "${p}")
+      list(APPEND sl "${s}")
+    endforeach()
+  endforeach()
   set(why "")
-  foreach(h p IN ZIP_LISTS hs ps)
+  foreach(h p s IN ZIP_LISTS hl pl sl)
     _hu_find_header(f "${h}" ${C_DIRS})
     if(NOT f)
       continue()
     endif()
     file(REAL_PATH "${f}" rf)
-    file(REAL_PATH "${p}" rp)
-    if(NOT rf STREQUAL rp)
-      string(APPEND why "\n  <${h}>: the consumer's include path finds '${f}'; the set's header unit is of '${p}'")
+    if(NOT rf IN_LIST covered)
+      string(APPEND why "\n  <${h}>: its include path finds '${f}', which has no header unit; set '${s}' has <${h}> as '${p}'")
     endif()
   endforeach()
   if(why)
-    message(FATAL_ERROR "target_import_header_units(${consumer} ${set}): the consumer would open other files than the "
-      "set's header units:${why}\nGive the consumer the set's include directory first, or leave the header out of the set.")
+    message(WARNING "HeaderUnits: target '${consumer}' receives header units of other files than its include path "
+      "finds:${why}\nAn import of such a header fails to compile (a #include of it stays textual). Give the target the "
+      "set's include directory first, or declare the file it finds as a header unit.")
   endif()
 endfunction()
 
