@@ -75,7 +75,12 @@ macro(_hu_Clang_consumer_options)
       get_property(pcms GLOBAL PROPERTY _HU_SET_${s}_CMIS)
       get_property(mids GLOBAL PROPERTY _HU_SET_${s}_MIDS)
       get_property(mmaps GLOBAL PROPERTY _HU_SET_${s}_MMAPS)
-      foreach(pcm mid mmap IN ZIP_LISTS pcms mids mmaps)
+      get_property(paths GLOBAL PROPERTY _HU_SET_${s}_PATHS)
+      foreach(pp pcm mid mmap IN ZIP_LISTS paths pcms mids mmaps)
+        if(hu_textual AND NOT pp IN_LIST hu_only)
+          continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
+        endif()
+        list(APPEND deps "${pcm}")
         # Spell the PCM relative to the top build dir (Ninja's cwd and node names): -fmodule-file-deps writes it
         # into the depfile as spelled, and an absolute spelling would be a different Ninja node (consumers would
         # only rebuild on the NEXT ninja run after a header edit).
@@ -86,7 +91,6 @@ macro(_hu_Clang_consumer_options)
           string(APPEND rsp_lines "\"${arg}\"\n")
         endforeach()
       endforeach()
-      list(APPEND deps ${pcms})
     endforeach()
     # The header-unit options go into a response file: CMake runs the dependency scan through cmd.exe on Windows
     # (8191 characters), and every header unit adds two long options.  The file is a dependency of the scan and

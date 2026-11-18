@@ -82,8 +82,10 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
 
 * Scans the target's C++ sources (including `CXX_MODULES` file sets) for `import <x>;` and `import "x";` (also with
   `export`).
-* A header that already belongs to a set is reused, whether it was declared or discovered for another target. The
-  others go into a new set `<target>_hu`. It is built with the target's own include directories, compile definitions,
+* A header that already belongs to a set is reused, whether it was declared or discovered for another target. Reuse
+  is decided by the file the name resolves to with this target's include paths, not by the name: `<config.h>` from two
+  different include directories gives two header units, `<vector>` (the same file) one. The others go into a new set
+  `<target>_hu`. It is built with the target's own include directories, compile definitions,
   link libraries (targets), standard and extensions, plus the values given here.
 * `import "x";` found next to the importing source is used by absolute path, like the compiler's quote lookup.
 * The scanned sources become `CMAKE_CONFIGURE_DEPENDS`, so adding an import re-runs CMake. `NO_RECONFIGURE` turns this
@@ -134,6 +136,24 @@ header units:
 * `target_auto_header_units` discovers them recursively;
 * imported BMIs are built first, and a change to them rebuilds the importers;
 * cycles are not diagnosed.
+
+### Keeping a source's `#include`s textual
+
+```cpp
+// HeaderUnits pragma: textual-includes
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+```
+
+A source containing the comment `HeaderUnits pragma: textual-includes` receives only the header units of its own
+`import` declarations (and of what those headers import). Every other `#include` in it stays textual, so macros
+defined before the include take effect. Use it for the one source of an stb-style single-header library that defines
+`XXX_IMPLEMENTATION`. A marked source with no imports compiles as a plain source.
+
+* It is a comment, not a `#pragma`: GCC and Clang warn about an unknown `#pragma` with `-Wall`, MSVC by default
+  (C4068). The compiler does not need to understand it; CMake reads it at configure time. In auto mode, editing the
+  source re-runs CMake; with `target_import_header_units`, re-run CMake after adding or removing it.
+* MSVC/MSBuild ignores it.
 
 ## Guidelines
 
@@ -229,7 +249,7 @@ cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
-tests/t01..t12/                  test projects; tests/run_suite.cmake is the driver
+tests/t01..t14/                  test projects; tests/run_suite.cmake is the driver
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
@@ -255,6 +275,8 @@ Each test is a standalone CMake project with a one-line README:
 | t10_header_imports | `HU_ALLOW_HEADER_IMPORTS`: headers importing header units (auto and manual, within and across sets), rebuild propagation |
 | t11_transitive | the header probe follows in-tree link interfaces recursively (ALIAS, imported, cross-directory, `LINK_ONLY`) |
 | t12_build_tree | headers inside the build tree: a FetchContent dependency and a `configure_file` header |
+| t13_same_name | two targets whose `<config.h>` are different files get one header unit each; `<vector>` (same file) is shared |
+| t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -283,7 +305,7 @@ How to run:
 
 ## Results (2026-11-17, fresh build directories)
 
-GCC/Clang suite: **72/72 PASS**, i.e. t01-t12 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
+GCC/Clang suite: **84/84 PASS**, i.e. t01-t14 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
 The last column is the MSVC pass-through (`run-msvc.bat`: MSVC 19.44, Visual Studio 17 2022, CMake 4.5.0; configure,
 build and ctest only).
 
@@ -301,6 +323,8 @@ build and ctest only).
 | t10_header_imports | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | t11_transitive | PASS | PASS | PASS | PASS | PASS | PASS | FAIL (link, fmt) |
 | t12_build_tree | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| t13_same_name | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| t14_textual_pragma | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A

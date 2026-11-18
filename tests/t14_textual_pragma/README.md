@@ -1,0 +1,1 @@
+t14: "// HeaderUnits pragma: textual-includes" in a source: its #includes stay textual (an stb-style IMPLEMENTATION include of a header that is a header unit elsewhere in the target), its own imports still use header units; a marked source without imports compiles plainly.

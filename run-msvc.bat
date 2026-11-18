@@ -10,7 +10,7 @@ setlocal EnableDelayedExpansion
 set "HERE=%~dp0"
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"
 if not defined HU_VS_GENERATOR set "HU_VS_GENERATOR=Visual Studio 17 2022"
-if not defined TESTS set "TESTS=t01_stl t02_thirdparty t03_named_modules t05_rebuild t06_mixed t07_own_headers t08_auto t10_header_imports t11_transitive t12_build_tree"
+if not defined TESTS set "TESTS=t01_stl t02_thirdparty t03_named_modules t05_rebuild t06_mixed t07_own_headers t08_auto t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma"
 set "OUT=%HERE%_build\msvc"
 if not exist "%OUT%" mkdir "%OUT%"
 set "RES=%OUT%\results.txt"
