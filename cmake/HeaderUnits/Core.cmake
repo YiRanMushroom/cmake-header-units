@@ -227,8 +227,12 @@ function(_hu_finalize)
   get_property(runs GLOBAL PROPERTY _HU_LOOKUP_RUNS)
   if(NOT runs)
     set(runs 0)
+  else()
+    _hu_self_check()
+    get_property(runs GLOBAL PROPERTY _HU_LOOKUP_RUNS)
   endif()
-  message(STATUS "HeaderUnits: header lookup: ${runs} compiler run(s) (one per distinct set of options, not per target)")
+  message(STATUS "HeaderUnits: header lookup: ${runs} compiler run(s) (one per distinct set of options plus the "
+    "self-check, not per target)")
 endfunction()
 
 function(_hu_finalize_run)
