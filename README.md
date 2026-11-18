@@ -451,3 +451,7 @@ header unit's macros make the scan itself depend on the BMIs. This is why the mo
 either declared, or discovered from literal import declarations at configure time. `docs/REPORT.md` (in Chinese)
 has the full investigation: CMake's behaviour, per-compiler experiments, prior art (build2, xmake, Buck2, MSBuild) and
 the design choices.
+
+## License
+
+MIT, see `LICENSE`.

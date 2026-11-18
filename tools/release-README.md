@@ -16,3 +16,5 @@ include(HeaderUnits)   # in the top-level CMakeLists.txt, after project(), befor
 ```
 
 Each commit of this branch names the main commit its files come from.
+
+License: MIT (`LICENSE`).
