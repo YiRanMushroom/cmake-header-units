@@ -1,29 +1,29 @@
 +++
 title = "Status: where the work stands"
 +++
-Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.0. The `release` branch holds the module of f2767f7 (d1e83cc); not updated since.
+Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.0. The `release` branch was updated from this main at the owner's word (see the release commit's message for the main commit); no new tag.
 
-What the owner wants (clarified 2026-11-19): "lean and fast" means: decide which features to support, write them mostly in one go, then adapt them bit by bit -- not dropping what should be supported. The owner keeps every feature: HU_ALLOW_HEADER_IMPORTS, the HU_GCC_WRAPPERS fallback, hu-mapper's import scan, Ninja Multi-Config, target_header_units_scan_sources. Known gaps are work to do (support them), not things to leave.
+What the owner wants (clarified 2026-11-19): "lean and fast" means: decide which features to support, write them mostly in one go, then adapt them bit by bit -- not dropping what should be supported. The owner keeps every feature: HU_ALLOW_HEADER_IMPORTS, the HU_GCC_WRAPPERS fallback, hu-mapper's import scan, Ninja Multi-Config, target_header_units_scan_sources. Known gaps are work to do, not things to leave. Every wait has a timeout of at most 3 minutes (instructions.project).
 
-Done since f2767f7:
-- Dead and duplicate code removed with no behaviour change (8e0ce15): build.ninja, maps, response files, hu-index.txt and manifests of t02, t04, t08 byte-identical before and after on mingw, win, clangcl, msvc.
-- MSVC with Ninja: a module interface source of two targets of one directory gives both targets' importers its header units (ae93aa5, t27; failed before with C7612).
-- Driver: t01's locked-source check works in a double-byte console code page (936).
-- README: Results is one table of the full matrix.
+Done since f2767f7 (all on main, pushed):
+- Dead and duplicate code removed, no behaviour change (build files of t02, t04, t08 byte-identical before/after on mingw, win, clangcl, msvc).
+- MSVC with Ninja: a module interface source of two targets of one directory gives both targets' importers its header units (t27).
+- Compatibility check: the directories' CMAKE_CXX_FLAGS[_<CONFIG>] are compared without warning, diagnostic and debug-information options (t04 T04_WARN).
+- MSVC in a non-ASCII directory: self-check reads /showIncludes with ENCODING ANSI; response files carry a UTF-8 BOM (t01 runs "*-é" for msvc). Outside the module: Ninja records cl's /showIncludes in ANSI while build.ninja is UTF-8, so such builds always recompile (a plain CMake project does the same); characters outside the ANSI code page cannot work with cl.
+- GCC without hu-mapper: a non-ASCII build directory or header path is rejected at configure time (GCC quotes it; its own mapper-file reader cannot read quotes).
+- Ninja Multi-Config: the header lookup uses each configuration's flags; a header found as different files (or only in some configurations) stops the configure (t23). Strict on purpose: a set's header unit is built in every configuration.
+- One rule for a target's C++ sources for the scan and the header units (_hu_target_cxx_sources; note sources.cxx-sources; t28): generator-expression sources skipped, LANGUAGE / HEADER_FILE_ONLY / CMAKE_CXX_SOURCE_FILE_EXTENSIONS decide, build-directory sources by relative path; names without an extension (CMP0115 OLD) are skipped as before.
+- Driver: t01's locked-source check in a double-byte console code page; README Results is one table.
 
-Verified (full matrix, 2026-11-19, the table in README Results): Linux gcc/clang/libcxx 27/27 with CMake 4.5.0, 26 + t22 SKIP with 4.4.5; Windows win 27/27, clangcl 27/27, mingw 26 + XFAIL t02, msvc 24 + XFAIL t02/t08/t11; MSBuild (run-msvc.bat) 11 + XFAIL t02/t08/t11. (t01 on mingw/win/clangcl re-run after the driver fix.)
+Verified: the full matrix at 69a26f9 (README Results): Linux gcc/clang/libcxx 28/28 with CMake 4.5.0, 27 + t22 SKIP with 4.4.5; Windows win 28/28, clangcl 28/28, mingw 27 + XFAIL t02, msvc 25 + XFAIL t02/t08/t11; MSBuild (run-msvc.bat, earlier the same day) 11 + XFAIL t02/t08/t11. After it (the CMP0115 skip, a t28 case): t03, t08, t15, t28 on mingw, win, clangcl, msvc and t08, t15, t28 on Linux gcc/clang/libcxx (CMake 4.4.5): PASS (msvc t08 XFAIL).
 
-In progress / open, in order:
-1. Done: (A) the compatibility check compares the directories' flags without warning, diagnostic and debug-information options (t04 variant T04_WARN, passes on mingw, win, clangcl, msvc, Linux gcc/clang/libcxx). (C) MSVC in a non-ASCII directory: the self-check reads cl's /showIncludes with ENCODING ANSI, and MSVC response files are written with a UTF-8 byte order mark (cl then reads them as UTF-8; without one as ANSI); t01's non-ASCII project runs for msvc as "*-é" (configure, build, run). Left, outside the module: Ninja records cl's /showIncludes in the ANSI code page while build.ninja is UTF-8, so in a non-ASCII directory every build recompiles -- a plain CMake project (cl, C++20, no HeaderUnits) does the same; a character outside the ANSI code page cannot work with cl.
-3. Done: (B) Ninja Multi-Config: the header lookup uses each configuration's CMAKE_CXX_FLAGS_<CONFIG>; a header that the configurations find as different files stops the configure naming the header, the configurations and the files (t23: relinc/ agrees, T23_SHADOW's <vector> stops; Debug and RelWithDebInfo share a run, filtered like the options). Verified (CMake 4.5.0 on Windows, the image's 4.4.5 on Linux): mingw t04, t23, t17 (and t25 before the split -D fix); win t04, t23, t17; clangcl and msvc t04, t23; Linux gcc, clang, libcxx t23; Linux gcc t25, t18 (all PASS). For the owner: a header found in some configurations and not in others also stops the configure (strict reading: a set's BMI is built in every configuration), which rejects t17's pattern (an import inside #ifdef NDEBUG whose header only CMAKE_CXX_FLAGS_RELEASE's directory has) under Ninja Multi-Config; single-config is unchanged.
-4. Done: (E) one function for a target's C++ sources (_hu_target_cxx_sources, note sources.cxx-sources): generator-expression sources ($<TARGET_OBJECTS:...>) are skipped instead of a FATAL (which also hit target_auto_header_units); build-directory sources listed by a relative path are scanned; LANGUAGE, HEADER_FILE_ONLY and CMAKE_CXX_SOURCE_FILE_EXTENSIONS decide; the default module set was read alike by both. t28 (fails on every case before). Verified at the commit: t03, t06, t08, t15, t16, t19, t28 PASS on mingw, win (CMake 4.5.0), Linux gcc and clang (4.4.5); msvc the same with t08 XFAIL; clangcl and libcxx not run.
-5. HU_GCC_WRAPPERS with a build directory outside the ANSI code page fails (g++-mapper-server and cmd scripts read narrow paths): check whether it can be supported.
-6. Ask the owner about a v0.1.1 tag and updating `release` once 1-4 are in.
+Open:
+1. Not covered by a test: the consumer warning naming a configuration (Multi-Config), GCC map keys for one file reached through differently spelled directories in different configurations, sources added through INTERFACE_SOURCES of linked libraries (neither command sees them), a GENERATED source with a same-named file in the source directory.
+2. Ask the owner about a v0.1.1 tag on the current release commit.
 
 Learned while testing:
-- Every wait has a timeout of at most 3 minutes, longer work is checked again every 3 minutes (instructions.project).
-- This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work (about 5 minutes). On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.
+- This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work, 5-7 minutes; slower when also subagents run tests. On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.
 - Docker Desktop may not be running ("open //./pipe/dockerDesktopLinuxEngine"): start "C:\Program Files\Docker\Docker\Docker Desktop.exe" and wait for `docker info`.
-- The driver reads child output in the console code page; with a double-byte one (936 here) non-ASCII paths in messages are garbled and can swallow a following "/": match messages loosely around them.
+- The driver reads child output in the console code page; with a double-byte one (936 here) non-ASCII paths in messages are garbled and can swallow a following "/": match messages loosely around them. A .bat with a non-ASCII path in it is read in the OEM code page: run such commands from bash.
 - `wsl -d <distro> -- bash script.sh "t01;t02"`: the ; ends the command that wsl.exe hands to the shell (exit 127); pass commas and turn them into ; inside the script.
 - t26 on Linux GCC only fails without the fix when the two targets spell the include directory the same way; MinGW always.

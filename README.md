@@ -443,7 +443,7 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t27/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+tests/t01..t28/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
@@ -557,18 +557,19 @@ How to run:
 
 ## Results
 
-The full matrix at `9e13e62` (2026-11-19; fresh build directories, `tests/run_parallel.cmake`; Linux in the image of
-`docker/`; Windows 11 with Visual Studio 2022 17.14 and Windows SDK 10.0.26100):
+The full matrix at `69a26f9` (2026-11-19; fresh build directories, `tests/run_parallel.cmake`; Linux in the image of
+`docker/`; Windows 11 with Visual Studio 2022 17.14 and Windows SDK 10.0.26100), with t03, t08, t15 and t28 run again
+after the last changes to the source rule:
 
 | toolchain | CMake 4.5.0 | CMake 4.4.5 |
 |---|---|---|
-| Linux, GCC 16.2 | 27/27 | 26 + t22 SKIP |
-| Linux, Clang 22 + libstdc++ 16 | 27/27 | 26 + t22 SKIP |
-| Linux, Clang 22 + libc++ 22 | 27/27 | 26 + t22 SKIP |
-| Windows, clang++ 22.1.8 + MSVC STL | 27/27 | |
-| Windows, clang-cl 22.1.8 + MSVC STL | 27/27 | |
-| Windows, MinGW-w64 GCC 16.1 | 26 + t02 XFAIL | |
-| Windows, MSVC 19.44 with Ninja | 24 + t02, t08, t11 XFAIL | |
+| Linux, GCC 16.2 | 28/28 | 27 + t22 SKIP |
+| Linux, Clang 22 + libstdc++ 16 | 28/28 | 27 + t22 SKIP |
+| Linux, Clang 22 + libc++ 22 | 28/28 | 27 + t22 SKIP |
+| Windows, clang++ 22.1.8 + MSVC STL | 28/28 | |
+| Windows, clang-cl 22.1.8 + MSVC STL | 28/28 | |
+| Windows, MinGW-w64 GCC 16.1 | 27 + t02 XFAIL | |
+| Windows, MSVC 19.44 with Ninja | 25 + t02, t08, t11 XFAIL | |
 | Windows, MSVC 19.44 with MSBuild (`run-msvc.bat`: t01-t16 without t04, t09) | 11 + t02, t08, t11 XFAIL | |
 
 * t22 (`import std`) needs CMake 4.5.
