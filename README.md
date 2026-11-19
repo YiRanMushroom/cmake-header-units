@@ -192,7 +192,10 @@ Gives the set's header units to all C++ sources of the target, or only to the li
   `_LIBCPP_ABI_*`; with the MSVC STL `_ITERATOR_DEBUG_LEVEL`, `_HAS_ITERATOR_DEBUGGING`, `_SECURE_SCL`,
   `_HAS_EXCEPTIONS` and `MSVC_RUNTIME_LIBRARY`) from the target, its directory and its link interface. This is checked
   at configure time.
-* A source used by several targets, in any directories, must get the same sets.
+* A source used by several targets, in any directories, must get the same sets. They may spell their include
+  directories differently: with GCC the source's map holds the spelling of every target. With Clang, clang-cl and MSVC
+  a header may be in several sets, each building its own BMI; a source must not get two of them (configure error, t04).
+  With GCC a header has one header unit per build tree (Limitations).
 
 ### HU_ALLOW_HEADER_IMPORTS (experimental)
 
@@ -281,8 +284,11 @@ defined before the include take effect. Use it for the one source of an stb-styl
   generated wrapper whose only line is `#include "<header>"`, and its own mapper lists only the wrapper: the same
   effect without a program (GCC does not check a header unit's name when it reads the BMI, so consumers still name the
   header). Debug information is the same either way (the wrapper only adds an include level, no code).
-* Each consumer source gets a map listing its header units. GCC also translates `#include`s of listed headers into
-  imports. Sources with the same content share one map (`gcc-m/<hash>.map`).
+* Each consumer source gets a map listing its header units, under every spelling the targets compiling it use (GCC
+  names a header unit by the spelling of the include directory it found it in, e.g. `app/../inc`). GCC also translates
+  `#include`s of listed headers into imports. `hu-index.txt` (source to map, read by the compile's mapper) is removed at
+  the start of every configure and rewritten at its end, so it describes exactly the current configure: with no
+  consumer left it is empty or missing, and every `#include` stays textual. Sources with the same content share one map (`gcc-m/<hash>.map`).
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
   header-unit map together: GCC starts `hu-mapper -c <module map> <index> <source>`, which reads both and finds the
   source's map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. No shell or `cmd.exe` runs in
@@ -319,7 +325,9 @@ scheme):
 **MSVC with Ninja** (`cmake/HeaderUnits/MSVCNinja.cmake`):
 
 * A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
-  as the set's object file, so it is a real Ninja output.
+  as the set's object file (`/ifcOutput`), so it is a real Ninja output. Source properties are per directory, so a
+  header in two sets of one directory shares its options: `/ifcOutput` names the set's directory as
+  `$<TARGET_PROPERTY:NAME>`, and the second set reuses the first one's object name.
 * Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency records, so it sees no
   header of the C++ library or the Windows SDK. Each IFC therefore also depends on the compiler and on a file in the
   build directory that records the compiler, its version and the `INCLUDE` environment variable; a CMake run rewrites
@@ -371,6 +379,10 @@ scheme):
   configure warning: an import of that header fails to compile (a `#include` of it stays textual).
 * The lookup takes a target's own `target_include_directories(SYSTEM ...)` directory for an `-I` one (CMake does not
   expose the difference at configure time); it matters only if a later `-I` directory has a header of the same name.
+* The consumer/set compatibility check compares `CMAKE_CXX_FLAGS` and the configuration's `CMAKE_CXX_FLAGS_<CONFIG>` of the
+  consumer's and the set's directories as whole strings, and the ABI-affecting definitions; under Ninja Multi-Config
+  for every entry of `CMAKE_CONFIGURATION_TYPES`, including configurations that are never built (the error names the
+  configuration). Definitions inside generator expressions are not compared.
 * The consumer/set compatibility check reads target and directory properties. Flags that only exist at generate time
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
@@ -404,7 +416,7 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t23/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+tests/t01..t25/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
@@ -440,7 +452,7 @@ Each test is a standalone CMake project with a one-line README:
 | t01_stl | `import <vector>/<string>/<iostream>` in a plain executable |
 | t02_thirdparty | fmt + nlohmann_json (+ Boost on Linux) + STL header units in one TU; overlapping sets; GCC build-order independence |
 | t03_named_modules | named modules with `export import <vector>`; cross-target importers, including CMake's synthesized BMI targets |
-| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, duplicate header) are rejected at configure time |
+| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, a consumer directory's own `CMAKE_CXX_FLAGS_DEBUG`, duplicate header) are rejected at configure time; the flags and ABI cases also under Ninja Multi-Config, with the configuration named in the message (Debug only for `_ITERATOR_DEBUG_LEVEL=0` with the MSVC STL) |
 | t05_rebuild | no-op build; touching or same-size edits of headers rebuild BMIs before consumers |
 | t06_mixed | header units and textual `#include` of overlapping headers in one TU, in every order; a TU excluded via `SOURCES` |
 | t07_own_headers | the project's own headers (in-tree library, local header) as header units; `#include` of them is translated |
@@ -451,7 +463,7 @@ Each test is a standalone CMake project with a one-line README:
 | t12_build_tree | headers inside the build tree: a FetchContent dependency and a `configure_file` header |
 | t13_same_name | two targets whose `<config.h>` are different files get one header unit each; `<vector>` (same file) is shared |
 | t14_textual_pragma | `// HeaderUnits pragma: textual-includes`: an stb-style `IMPLEMENTATION` include stays textual, the source's own imports still use header units |
-| t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected |
+| t15_scan_sources | `target_header_units_scan_sources`: only the listed sources are scanned and get header units (two calls for one target); an unlisted source keeps a macro-configured `#include` textual; a non-source is rejected; sources that stop being consumers (one dropped from `SOURCES`; the last import made an `#include`; no header-unit command left) include the header textually again (depfile) and see its edits, and with GCC `hu-index.txt` no longer names them |
 | t16_deferred | both commands written before the target's settings in the same file: link library, include directories, directory definition and compile options all reach the header units; a later change from the parent directory is reported |
 | t17_lookup | the header lookup follows the compiler's search list: the first `-I` directory wins over a later one and over `-isystem` (an imported target's); an include directory spelled with `..`; `-isystem` in `CMAKE_CXX_FLAGS` and, in a Release build, in `CMAKE_CXX_FLAGS_RELEASE` (in Debug that import is in an inactive `#ifdef` and its header is not found: skipped); `CMAKE_INCLUDE_CURRENT_DIR`; the C++ library's directory given again with `-I`; (not on Windows) a directory reached through a symbolic link; with GCC 16, C++26 and `-freflection`; an IDE-style probe of the header-unit flags (`-E`, no `-M`); a source at a long path |
 | t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`); both list a directory that does not exist first |
@@ -460,6 +472,8 @@ Each test is a standalone CMake project with a one-line README:
 | t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler), and with its headers in a directory with a space (with `HU_GCC_WRAPPERS` a configure error) |
 | t22_import_std | `import std;` (CMake's `CMAKE_CXX_MODULE_STD`) in the same TUs as a header unit whose header includes `<string>`: one TU imports both, another `#include`s the header next to `import std;`. Needs CMake 4.5 (SKIP before: `import std` is experimental there); with Clang in the Linux image the driver names GCC's `libstdc++.modules.json` |
 | t23_multi_config | Ninja Multi-Config: Debug and Release build and run with their own header units (the header's value depends on `NDEBUG`), each a no-op after; a header edit rebuilds the BMI and its consumers in one `ninja` run; a deleted BMI is rebuilt; the consumer's depfile names its BMI; MSVC (and GCC with `HU_GCC_WRAPPERS`) is rejected at configure time with the reason |
+| t24_two_sets | one header in two sets of the same directory, each set imported by its own target (`<vector>`, and `<t24/val.h>`, which the second set spells `<val.h>`): GCC rejects the second set at configure time (one header unit per header per build tree); the other toolchains build four distinct BMIs, each consumer's compile gets only its own set's BMIs, and a deleted BMI is rebuilt alone with its consumer |
+| t25_shared_source | one source compiled by three targets that import the same set, each spelling the include directory differently (`a/../inc`; in one directory `b/../inc` and `b/../b/../inc`): every compile imports `<sh.h>` and translates `#include <sh2.h>` (GCC: checked in the depfiles) |
 
 For each test, `tests/run_suite.cmake` runs:
 
