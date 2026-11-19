@@ -12,7 +12,7 @@ snippet = "function(_hu_target_search p tgt)"
 
 [[items]]
 name = "base-run"
-value = "Key: ARG1, CMAKE_CXX_FLAGS, CMAKE_CXX_FLAGS_<CFG> (CFG argument, not CMAKE_BUILD_TYPE), sysroot/target/toolchain, the -std option (GCC refuses -freflection without it); the configuration's flags and the options without -W/-D/-U/-O/-g (_hu_search_opts), so CMake's default per-configuration flags (-g, -O3 -DNDEBUG, ...; clang-cl /Ob0 /Od, /O2 /DNDEBUG, measured) give one run. No include dirs: marker dirs -I mI -isystem mS stand for them (clang-cl: -I mI /external:I mB -imsvc mS, see clang.clang-cl). A printed list is used whatever the exit code."
+value = "Key: ARG1, CMAKE_CXX_FLAGS, CMAKE_CXX_FLAGS_<CFG> (CFG argument, not CMAKE_BUILD_TYPE), sysroot/target/toolchain, the -std option (GCC refuses -freflection without it); the configuration's flags and the options without -W/-D/-U/-O/-g (_hu_search_opts; a split "-D NAME" drops NAME too: clang/clang-cl stop on the stray input before printing the list, GCC does not), so CMake's default per-configuration flags (-g, -O3 -DNDEBUG, ...; clang-cl /Ob0 /Od, /O2 /DNDEBUG, measured) give one run. No include dirs: marker dirs -I mI -isystem mS stand for them (clang-cl: -I mI /external:I mB -imsvc mS, see clang.clang-cl). A printed list is used whatever the exit code."
 path = "cmake/HeaderUnits/Common.cmake"
 snippet = "function(_hu_search_base p)"
 

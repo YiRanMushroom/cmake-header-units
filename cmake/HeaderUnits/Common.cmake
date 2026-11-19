@@ -33,10 +33,20 @@ function(_hu_dir_spellings raw_out norm_out d)
   set(${norm_out} "${n}" PARENT_SCOPE)
 endfunction()
 
-# The options among ARGN that can change the search list: not warnings, -D/-U, -O, -g (nor clang-cl's /W, /D, /U, /O).
+# The options among ARGN that can change the search list: not warnings, -D/-U (also with the name as the next
+# argument), -O, -g (nor clang-cl's /W, /D, /U, /O).
 function(_hu_search_opts out)
   set(r)
+  set(name FALSE)
   foreach(x IN LISTS ARGN)
+    if(name)                   # the name of "-D NAME"
+      set(name FALSE)
+      continue()
+    endif()
+    if(x MATCHES "^-[DU]$" OR (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND x MATCHES "^/[DU]$"))
+      set(name TRUE)
+      continue()
+    endif()
     if((x MATCHES "^-(W|D|U|O|pedantic|fdiagnostics)" AND NOT x MATCHES "^-W[apl],")
        OR x MATCHES "^-g([0-3]|gdb[0-3]?|dwarf.*|split-dwarf|line-tables-only|column-info|z.*)?$"
        OR (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND x MATCHES "^/(W|D|U|O)"))
