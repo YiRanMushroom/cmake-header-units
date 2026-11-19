@@ -73,10 +73,6 @@ macro(_hu_Clang_add_header)
     list(APPEND cmis "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/${cfg}hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
 endmacro()
 
-# add_header_units(), after the headers: nothing to do for Clang.
-macro(_hu_Clang_finish_set)
-endmacro()
-
 # _hu_check_compat(): no Clang-specific checks.
 macro(_hu_Clang_check_compat)
 endmacro()
@@ -137,10 +133,7 @@ macro(_hu_Clang_consumer_options)
     string(SUBSTRING "${rk}" 0 16 rk)
     get_property(cfg GLOBAL PROPERTY _HU_CFG)
     set(rsp "${hudir}/rsp/${cfg}${rk}.rsp")
-    if(NOT DEFINED _hu_cw_${rk})
-      set(_hu_cw_${rk} 1)
-      _hu_write("${rsp}" "${rsp_lines}")
-    endif()
+    _hu_write("${rsp}" "${rsp_lines}" ONCE)
     list(APPEND deps ${_hu_cdeps})
     if(NOT hu_textual)
       set(_hu_cr_${_hu_ck} "${rsp}")

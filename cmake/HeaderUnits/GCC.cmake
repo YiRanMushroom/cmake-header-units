@@ -43,6 +43,11 @@ if(_hu_cfg AND NOT _hu_mapper)
   message(FATAL_ERROR "HeaderUnits: with GCC and Ninja Multi-Config, hu-mapper is required (not HU_GCC_WRAPPERS, and a "
     "host compiler when cross-compiling): the wrappers and scripts of the fallback have no per-configuration maps.")
 endif()
+if(NOT _hu_mapper AND NOT _HU_DIR MATCHES "^[ -~]*$")
+  message(FATAL_ERROR "HeaderUnits: with GCC and without hu-mapper (HU_GCC_WRAPPERS, or cross-compiling without a host "
+    "compiler) the build directory must be ASCII: GCC quotes a non-ASCII path in its module-mapper requests, which its "
+    "own mapper-file reader does not understand (found '${_HU_DIR}').")
+endif()
 if(NOT _hu_mapper AND CMAKE_HOST_WIN32 AND _HU_DIR MATCHES "[&|<>^%,;=]")
   message(FATAL_ERROR "HeaderUnits: with GCC on Windows and without hu-mapper the build directory must not contain any of "
     "& | < > ^ % , ; = (the module mapper runs through cmd.exe, which splits or interprets them).")
@@ -259,7 +264,7 @@ function(_hu_gcc_wrapper src_out keys_out hudir p)
   set(${keys_out} "${keys}" PARENT_SCOPE)
 endfunction()
 
-# add_header_units(), per header: in: set, h, p (resolved path), oname, hudir; appends cmis, hmaps, maplines.
+# add_header_units(), per header: in: set, h, p (resolved path), oname, hudir; appends cmis, hmaps.
 macro(_hu_GCC_add_header)
     # GCC: a header unit's identity is the path string; CMake passes the source as this absolute path.
     cmake_path(NORMAL_PATH p OUTPUT_VARIABLE np)
@@ -268,9 +273,10 @@ macro(_hu_GCC_add_header)
         "path. CMake would compile '${np}', a different header-unit identity for GCC. Not supported.")
     endif()
     get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
-    if(NOT mapper AND p MATCHES "[ \t]")
-      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); without hu-mapper "
-        "(HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files cannot express it.")
+    if(NOT mapper AND (p MATCHES "[ \t]" OR NOT p MATCHES "^[ -~]*$"))
+      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space or a non-ASCII "
+        "character); without hu-mapper (HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files "
+        "cannot express it (GCC quotes such a path, and its own mapper-file reader does not understand quotes).")
     endif()
     file(REAL_PATH "${p}" rpo)
     string(MD5 ok "${rpo}")
@@ -294,13 +300,6 @@ macro(_hu_GCC_add_header)
     else()
       set(hmap "${hudir}/gcc/${cfg}${set}/${oname}.map")
     endif()
-    # Keys: the spellings GCC may use for this header with the set's search list (consumers get their own, at the end).
-    _hu_gcc_keys(hkeys "${p}" "${h}" DIRS ${S_DIRS} RAW ${S_RAW})
-    set(keys "")
-    foreach(kk IN LISTS hkeys)
-      _hu_gcc_line(l "${kk}" "${rcmi}")
-      string(APPEND keys "${l}")
-    endforeach()
     # The header unit's own mapper makes GCC translate no #include inside it into an import (CMI content independent of
     # build order), not even one of the header itself: hu-mapper answers the export with the CMI and an #include of the
     # header (each spelling) with "textual"; without hu-mapper, the wrapper is compiled and only it is listed.
@@ -318,7 +317,6 @@ macro(_hu_GCC_add_header)
     endif()
     _hu_write("${hmap}" "${hlines}" UNIX)
     list(APPEND hmaps "${hmap}")
-    string(APPEND maplines "${keys}")
     set_source_files_properties("${hsrc}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
@@ -328,11 +326,6 @@ macro(_hu_GCC_add_header)
       # '-MM'"), as IDEs run these flags to read the compiler's settings (CLion).
       COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;${mopt};-Mno-modules")
     list(APPEND cmis "${cmi}")
-endmacro()
-
-# add_header_units(), after the headers: nothing for GCC (a header inside the build tree needs no launcher: the
-# wrapper is what CMake compiles and what the header unit's own mapper names).
-macro(_hu_GCC_finish_set)
 endmacro()
 
 # _hu_check_compat(): the consumer's directory must see the mapper override.
@@ -421,18 +414,24 @@ macro(_hu_GCC_consumer_options)
       endforeach()
     endif()
     string(MD5 _hu_gsk "${src}")
-    set(_hu_gkeys)                                   # the distinct search lists of the source's targets
-    set(_hu_gtks)                                    # a target of each
+    set(_hu_gkeys)          # the distinct search lists of the source's targets (and configurations: Ninja Multi-Config)
     foreach(_hu_t IN LISTS _hu_gst_${_hu_gsk})
       string(MD5 tk "${_hu_t}")
-      if(NOT DEFINED _hu_cs_${tk}_DIRS)
-        _hu_target_search(_hu_cs_${tk} ${_hu_t})
-        string(MD5 _hu_cs_${tk}_KEY "${_hu_cs_${tk}_DIRS}|${_hu_cs_${tk}_RAW}")
+      if(NOT DEFINED _hu_cs_${tk})              # the target's lists: their keys, and per key _hu_gl_<key>_DIRS / _RAW
+        _hu_target_search(_hu_cs ${_hu_t})
+        math(EXPR _hu_last "${_hu_cs_N} - 1")
+        foreach(_hu_k RANGE ${_hu_last})
+          string(MD5 _hu_lk "${_hu_cs_DIRS_${_hu_k}}|${_hu_cs_RAW_${_hu_k}}")
+          list(APPEND _hu_cs_${tk} ${_hu_lk})
+          set(_hu_gl_${_hu_lk}_DIRS "${_hu_cs_DIRS_${_hu_k}}")
+          set(_hu_gl_${_hu_lk}_RAW "${_hu_cs_RAW_${_hu_k}}")
+        endforeach()
       endif()
-      if(NOT _hu_cs_${tk}_KEY IN_LIST _hu_gkeys)
-        list(APPEND _hu_gkeys "${_hu_cs_${tk}_KEY}")
-        list(APPEND _hu_gtks "${tk}")
-      endif()
+      foreach(_hu_lk IN LISTS _hu_cs_${tk})
+        if(NOT _hu_lk IN_LIST _hu_gkeys)
+          list(APPEND _hu_gkeys ${_hu_lk})
+        endif()
+      endforeach()
     endforeach()
     # The map's content depends only on the search lists and the sets, so it is computed once per such pair (not per
     # source), and each header's keys once per search list: _hu_gcc_keys queries the file system.  (Variables of the
@@ -453,11 +452,11 @@ macro(_hu_GCC_consumer_options)
             continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
           endif()
           set(_hu_gfirst TRUE)
-          foreach(tk IN LISTS _hu_gtks)
-            string(MD5 _hu_gkk "${_hu_cs_${tk}_KEY}|${p}|${h}")
+          foreach(_hu_lk IN LISTS _hu_gkeys)
+            string(MD5 _hu_gkk "${_hu_lk}|${p}|${h}")
             if(NOT DEFINED _hu_gk_${_hu_gkk})
               file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
-              _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
+              _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_gl_${_hu_lk}_DIRS} RAW ${_hu_gl_${_hu_lk}_RAW})
               set(_hu_gk_${_hu_gkk} "")
               set(_hu_gkl_${_hu_gkk} "${pkeys}")
               foreach(kk IN LISTS pkeys)
@@ -500,10 +499,7 @@ macro(_hu_GCC_consumer_options)
     string(SUBSTRING "${_hu_gmk}" 0 16 _hu_gmk)
     get_property(cfg GLOBAL PROPERTY _HU_CFG)
     set(smap "${hudir}/gcc-m/${cfg}${_hu_gmk}.map")
-    if(NOT DEFINED _hu_gw_${_hu_gmk})
-      set(_hu_gw_${_hu_gmk} 1)
-      _hu_write("${smap}" "$root .\n${content}" UNIX)
-    endif()
+    _hu_write("${smap}" "$root .\n${content}" UNIX ONCE)
     # One index line per (target, source), written for all the source's targets at once: every directory computes the
     # same map for it (above), and this macro runs once per (directory, source).  Keyed by the target's object
     # directory (_hu_gcc_objdir: the compile's module map is in it) and Ninja's $in (CMAKE-INTERNAL: the Ninja

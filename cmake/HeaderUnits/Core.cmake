@@ -70,13 +70,14 @@ function(add_header_units set)
   set_target_properties(${set} PROPERTIES POSITION_INDEPENDENT_CODE ${pic})
 
   # Each header's file: the first match in the set's include search list, read from the set target as CMake will
-  # compile it (with what its directory adds: include_directories(), add_compile_options(), CMAKE_INCLUDE_CURRENT_DIR).
+  # compile it (with what its directory adds: include_directories(), add_compile_options(), CMAKE_INCLUDE_CURRENT_DIR),
+  # the same in every configuration.
   _hu_target_search(S ${set})
   set(search ${S_DIRS})
   set(paths)
   set(reals)
   foreach(h IN LISTS A_HEADERS)
-    _hu_find_header(p "${h}" ${search})
+    _hu_target_find(p S "${h}" "add_header_units(${set})")
     if(NOT p)
       string(JOIN "\n  " shown ${search})
       message(FATAL_ERROR "add_header_units(${set}): <${h}> is not found in the include search list of the set's flags "
@@ -108,7 +109,6 @@ function(add_header_units set)
   set(mids)
   set(mmaps)
   set(hmaps)
-  set(maplines "")
   foreach(h p IN ZIP_LISTS A_HEADERS paths)
     if(IS_ABSOLUTE "${h}")
       # a header found relative to a source file (quote import), given by absolute path: short object name
@@ -131,27 +131,17 @@ function(add_header_units set)
     list(APPEND rpaths "${p}")
   endforeach()
 
-  cmake_language(CALL _hu_${tc}_finish_set)
-
-  # Import declarations inside the headers: an error unless HU_ALLOW_HEADER_IMPORTS is ON (experimental).
-  foreach(h p IN ZIP_LISTS A_HEADERS rpaths)
-    _hu_scan_imports(imps "${p}")
-    if(NOT imps)
-      continue()
-    endif()
-    if(NOT HU_ALLOW_HEADER_IMPORTS)
-      set(shown "${imps}")
-      list(TRANSFORM shown REPLACE "^a\\|(.*)$" "import <\\1>")
-      list(TRANSFORM shown REPLACE "^q\\|(.*)$" "import \"\\1\"")
-      string(JOIN ", " shown ${shown})
-      message(FATAL_ERROR "add_header_units(${set}): header <${h}> ('${p}') contains ${shown}. Import declarations inside "
-        "headers are not supported yet: use #include in headers (inside a TU that receives the header units, a "
-        "#include of a header unit is turned into an import automatically), or set HU_ALLOW_HEADER_IMPORTS ON "
-        "(experimental: header units that import other header units).")
-    endif()
-    string(MD5 hk "${p}")
-    set_property(GLOBAL PROPERTY _HU_HDRIMPORTS_${hk} "${imps}")
-  endforeach()
+  # HU_ALLOW_HEADER_IMPORTS: the import declarations of each header, by the path the toolchain compiles (without it, a
+  # header with one stopped the configure above).
+  if(HU_ALLOW_HEADER_IMPORTS)
+    foreach(p IN LISTS rpaths)
+      _hu_scan_imports(imps "${p}")
+      if(imps)
+        string(MD5 hk "${p}")
+        set_property(GLOBAL PROPERTY _HU_HDRIMPORTS_${hk} "${imps}")
+      endif()
+    endforeach()
+  endif()
   # Registry: a header is identified by its real path (a symbolic link, an 8.3 name, "dir/../x.h" are the same file):
   # real path -> set, used by target_auto_header_units (reuse) and header imports (_hu_lookup).
   foreach(rp IN LISTS reals)
@@ -171,7 +161,6 @@ function(add_header_units set)
   set_property(GLOBAL PROPERTY _HU_SET_${set}_SEARCH_RAW "${S_RAW}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_PIC "${pic}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_OPTS "${A_COMPILE_OPTIONS}")
-  set_property(GLOBAL PROPERTY _HU_SET_${set}_MAPLINES "${maplines}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_CMIS "${cmis}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_MIDS "${mids}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_MMAPS "${mmaps}")
@@ -208,7 +197,7 @@ function(target_import_header_units consumer set)
   if(DEFINED A_SOURCES)
     set(abs)
     foreach(s IN LISTS A_SOURCES)
-      cmake_path(ABSOLUTE_PATH s BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE OUTPUT_VARIABLE a)
+      _hu_source_path(a "${s}" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
       list(APPEND abs "${a}")
     endforeach()
     set_property(GLOBAL PROPERTY _HU_REQ_${cnt}_SOURCES "${abs}")
