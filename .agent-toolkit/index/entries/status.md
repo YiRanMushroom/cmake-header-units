@@ -1,12 +1,7 @@
 +++
-title = "Status 2026-11-19: where the work stands (handoff between machines); delete this note when it is out of date"
-keys = [ "handoff", "open work", "status", "todo" ]
-
-[[links]]
-path = "tests/run_suite.cmake"
-snippet = "set(ALL_TESTS t01_stl"
+title = "Status: where the work stands"
 +++
-State of main when this was written (pushed). The `release` branch was updated from it (d1e83cc, the module of f2767f7) at the owner's word, before a full matrix; no new version tag was made (the last one is v0.1.0).
+Written 2026-11-19 at main f2767f7 (pushed), when the work moved to another machine. The `release` branch was updated from it (d1e83cc, the module of f2767f7) at the owner's word, before a full matrix; no new version tag was made (the last one is v0.1.0).
 
 Since v0.1.0 (b0fc455), on main:
 - MSVC with Ninja: one header in two sets of one directory (t24). GCC: a shared source's map holds every target's spellings (t25); hu-index.txt describes the current configure also with no consumer left (t15); a target that does not import header units gets no map for a shared source (t26, hu-mapper version 3).
