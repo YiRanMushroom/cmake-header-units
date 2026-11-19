@@ -102,6 +102,20 @@ set(_hu_index "${_HU_DIR}/hu-index.txt")
 if(_hu_cfg)
   set(_hu_index "${_HU_DIR}/$CONFIG/hu-index.txt")
 endif()
+# The compile rule reads hu-index.txt whenever this file is included, but _hu_finalize (_hu_GCC_consumers_done) writes it
+# only when a header-unit command ran.  Removed at the start of every configure, so that none is left from a previous
+# one: a source that is no consumer any more (no import left for target_auto_header_units(), the last
+# target_import_header_units() or every header-unit command removed) would keep its old map, and GCC would turn its
+# #include into an import of a header unit no longer built or ordered before the compile (and miss the header's edits).
+# No index means no header-unit map (hu-mapper -c and the scripts alike).
+if(_hu_cfg)
+  foreach(_hu_c IN LISTS CMAKE_CONFIGURATION_TYPES)
+    file(REMOVE "${_HU_DIR}/${_hu_c}/hu-index.txt")
+  endforeach()
+  unset(_hu_c)
+else()
+  file(REMOVE "${_HU_DIR}/hu-index.txt")
+endif()
 if(_hu_mapper AND CMAKE_HOST_WIN32)
   string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
          "\"-fmodule-mapper=|${_hu_mapper} -c $out.modmap ${_hu_index} $in\""
@@ -455,7 +469,8 @@ macro(_hu_GCC_consumer_options)
     endif()
 endmacro()
 
-# _hu_finalize(), after every consumer source: write hu-index.txt, which hu-mapper -c or the script reads.
+# _hu_finalize(), after every consumer source (also when there is none): write hu-index.txt, which hu-mapper -c or the
+# script reads.
 macro(_hu_GCC_consumers_done)
     get_property(index GLOBAL PROPERTY _HU_GCC_HU_INDEX)
     get_property(cfg GLOBAL PROPERTY _HU_CFG)
