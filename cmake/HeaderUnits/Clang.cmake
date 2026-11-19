@@ -68,6 +68,10 @@ macro(_hu_Clang_header_import_done)
     list(APPEND opts "-fmodule-file-deps" "-Wno-experimental-header-units")
 endmacro()
 
+# _hu_finalize(), after every consumer source: nothing to do for Clang.
+macro(_hu_Clang_consumers_done)
+endmacro()
+
 # _hu_finalize(), per consumer source: in: t, src, tsets, sdk, hudir; appends opts and deps.
 macro(_hu_Clang_consumer_options)
     set(rsp_lines "")
