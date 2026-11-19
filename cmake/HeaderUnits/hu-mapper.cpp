@@ -16,7 +16,7 @@
 // import the header unit being built.  This mapper answers MODULE-EXPORT with the CMI, and INCLUDE-TRANSLATE of the
 // header being built with "BOOL TRUE" ("textual"), so that #include stays a plain include, guarded as usual.
 //
-// Map file (one directive or entry per line, words separated by blanks, no quoting):
+// Map file (one directive or entry per line, words separated by blanks and quoted as in the protocol, see words()):
 //   $root <dir>        MODULE-REPO answer (CMI paths below are relative to it)
 //   $export <cmi>      the CMI to write, whatever name GCC exports under (one export per compilation)
 //   $textual <path>    an #include of <path> stays textual (the header being built, each spelling GCC may use)

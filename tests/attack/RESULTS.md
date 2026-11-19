@@ -46,6 +46,18 @@ The a09 steps were chosen by the porter (no original driver): re-run cmake, dele
 After re-running cmake, the first ninja re-collates the dyndep files, because CMake rewrites CXXDependInfo.json. The driver accepts that as long as nothing is recompiled.
 Control run without the module (a plain C++20 project, CMake 4.5.0 in hu-dev): after re-running cmake, `ninja -n -d explain` shows the same `CXX.dd older than most recent input .../CXXDependInfo.json` (g++: `@cmake_cxx_std@synth_0`, clang: `c.dir`). This is CMake behaviour.
 
+## Update 2026-11-19: GCC header paths with blanks
+
+`hu-mapper` reads quoted map entries, so with GCC a header at a path with a space now works. Without `hu-mapper`
+(`HU_GCC_WRAPPERS` ON) GCC's own mapper-file reader is used, which has no quoting, and such a header stays a configure
+error. A build directory with a space stays a configure error with GCC. GCC 16.2, CMake 4.4.5, Linux:
+
+| scenario | gcc |
+|---|---|
+| a07_space | EXPECTED-ERROR (`with GCC the build directory must not contain spaces`) |
+| a07_space_gcchdr | PASS (was EXPECTED-ERROR): a07=0, no-op |
+| a07_space_gcchdr_wrappers (new: `HU_GCC_WRAPPERS` ON) | EXPECTED-ERROR (`<sp/sp.hpp> resolves to '.../vendor dir/include/sp/sp.hpp' (contains a space)`) |
+
 ## Update 2026-11-19: configure-time ABI check
 
 The consumer/set check now compares definitions that change the C++ library's ABI (`_GLIBCXX_DEBUG`, ...; with the MSVC

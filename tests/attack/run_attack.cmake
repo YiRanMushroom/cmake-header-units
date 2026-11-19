@@ -176,7 +176,8 @@ variant(a05_extoff   SRC a05_compat ARGS -DA05_MODE=extoff   RUN a05=0)
 variant(a06_longpath SRC a06_longpath RUN a06=0)
 variant(a07_space  SRC a07_space BDIR "a07 space dir" RUN a07=0
         EXPECT_gcc "CFG:with GCC the build directory must not contain spaces")
-variant(a07_space_gcchdr SRC a07_space TCS gcc RUN a07=0
+variant(a07_space_gcchdr SRC a07_space TCS gcc RUN a07=0)
+variant(a07_space_gcchdr_wrappers SRC a07_space TCS gcc ARGS -DHU_GCC_WRAPPERS=ON RUN a07=0
         EXPECT_gcc "CFG:<sp/sp.hpp> resolves to '[^']*vendor dir/include/sp/sp.hpp' [(]contains a space[)]")
 variant(a08_junction SRC a08_junction RUN a08_junc=0 a08_dotdot=0 a08_junc2=0)
 variant(a08_single SRC a08_junction ARGS -DA08_SINGLE=ON RUN a08_junc=0 a08_dotdot=0)
