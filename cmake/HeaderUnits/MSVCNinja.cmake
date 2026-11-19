@@ -8,6 +8,8 @@
 #   response file (one per distinct content): an import of the header, or an #include of it, uses the IFC.  The
 #   dependency scan gets
 #   "/translateInclude-" (see below).
+# * An IFC also depends on the compiler and on a file that records the toolchain (see below): Ninja keeps no header of
+#   the C++ library or the Windows SDK in its dependencies.
 # * IFCs are spelled relative to the top build dir (Ninja's working directory).
 # * CMake's own module scan (cl /scanDependencies) accepts an import of a header unit; it gets the same options.
 #
@@ -27,14 +29,28 @@ endif()
 string(APPEND CMAKE_CXX_SCANDEP_SOURCE " /translateInclude-")
 set_property(GLOBAL PROPERTY _HU_MSVC_SCAN_RULE "${CMAKE_CXX_SCANDEP_SOURCE}")
 
+# Ninja's msvc deps (/showIncludes) leave out every header whose path holds "Program Files" or "Microsoft Visual
+# Studio", so no header of the C++ library or the Windows SDK is a dependency of anything.  Every header unit depends
+# instead on the compiler (an update of Visual Studio may replace it in its directory) and on a file that records the
+# compiler, its version and the INCLUDE environment variable (cl's system include directories, which name the toolset
+# and the Windows SDK).  Each CMake run writes the file, and only when its content changes.
+set(_hu_include "$ENV{INCLUDE}")
+file(CONFIGURE OUTPUT "${_HU_DIR}/msvc-toolchain.txt" CONTENT
+  "CMAKE_CXX_COMPILER=@CMAKE_CXX_COMPILER@\nCMAKE_CXX_COMPILER_VERSION=@CMAKE_CXX_COMPILER_VERSION@\nINCLUDE=@_hu_include@\n"
+  @ONLY)
+unset(_hu_include)
+set_property(GLOBAL PROPERTY _HU_MSVC_TOOLCHAIN_DEPS "${_HU_DIR}/msvc-toolchain.txt" "${CMAKE_CXX_COMPILER}")
+
 # add_header_units(), per header: in: set, h, p, oname, hudir; appends cmis.
 macro(_hu_MSVC_add_header)
     # CMAKE-INTERNAL: object location, see Clang.cmake.  With /ifcOnly cl writes no object; the IFC takes its place.
     set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
     file(RELATIVE_PATH rcmi "${CMAKE_BINARY_DIR}" "${cmi}")
+    get_property(tcdeps GLOBAL PROPERTY _HU_MSVC_TOOLCHAIN_DEPS)
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
+      OBJECT_DEPENDS "${tcdeps}"
       COMPILE_OPTIONS "/exportHeader;/ifcOnly;/ifcOutput;${rcmi}")
     list(APPEND cmis "${cmi}")
 endmacro()

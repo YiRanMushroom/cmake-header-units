@@ -301,6 +301,11 @@ defined before the include take effect. Use it for the one source of an stb-styl
 
 * A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
   as the set's object file, so it is a real Ninja output.
+* Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency records, so it sees no
+  header of the C++ library or the Windows SDK. Each IFC therefore also depends on the compiler and on a file in the
+  build directory that records the compiler, its version and the `INCLUDE` environment variable; a CMake run rewrites
+  the file only when one of them changed. An update of the compiler, or a CMake run after a change of the Visual Studio
+  toolset or the Windows SDK, rebuilds the header units and their consumers.
 * Each consumer source gets `/headerUnit "<header>=<ifc>"` for its header units and `/translateInclude` in a
   response file (one per distinct content). CMake's dependency scan gets the per-source options too, and `cl /scanDependencies` with
   `/translateInclude` recurses without end into a header that includes itself through another one, so CMake's scan rule
@@ -355,8 +360,11 @@ defined before the include take effect. Use it for the one source of an stb-styl
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
     (`format_facet<std::locale>::do_put` unresolved; see Tests);
   * with Ninja, Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency
-    records (for every MSVC compile, not only header units): an update of Visual Studio or the Windows SDK does not
-    rebuild the header units of the C++ library. Delete the build directory after one.
+    records (for every MSVC compile, not only header units). The header units depend on the compiler and on the
+    `INCLUDE` environment variable instead (see How it works), so a changed `INCLUDE` takes effect at the next CMake
+    run, not at a build from another environment, and sources that import no header unit are not rebuilt. An update
+    that replaces headers of the Windows SDK in their version directory goes unnoticed; delete the build directory
+    after one.
 
 ## Repository layout
 
@@ -460,7 +468,8 @@ How to run:
 * Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest with a Visual Studio generator; t04 and t09 are
   skipped. `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
   header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
-  for those headers; the IDE probe and t04's extensions variant do not apply.
+  for those headers; the IDE probe and t04's extensions variant do not apply. t01 also checks that a CMake run without
+  changes compiles nothing and that one with another `INCLUDE` rebuilds the header units and their consumer.
 * Adversarial scenarios: `tests/attack/run-attack-linux.sh` and `tests/attack/run-attack-win.bat`; results are in
   `tests/attack/RESULTS.md`.
 
