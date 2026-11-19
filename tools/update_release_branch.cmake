@@ -1,5 +1,6 @@
 # Makes the next commit of branch "release" from a commit of main: its tree is that commit's cmake/ and LICENSE, plus
-# tools/release-README.md as README.md; its parent is the previous release commit; its message names the source commit.
+# tools/release-README.md as README.md; its parent is the previous release commit (local branch "release", else
+# origin/release); its message names the source commit.
 #   cmake [-DFROM=<commit>] -P tools/update_release_branch.cmake        (default FROM: HEAD)
 # Nothing is checked out and nothing is pushed (then: git push origin release).  The commit uses your git identity.
 cmake_minimum_required(VERSION 3.20)
@@ -45,6 +46,11 @@ file(REMOVE "${idx}")
 
 string(SUBSTRING "${sha}" 0 12 short)
 hu_git(prev MAYFAIL rev-parse --verify -q refs/heads/release)
+if(NOT prev)
+  # A clone has only origin/release until a local branch is made: continue that history (a commit without a parent
+  # would not push onto it).
+  hu_git(prev MAYFAIL rev-parse --verify -q refs/remotes/origin/release)
+endif()
 set(parent)
 if(prev)
   hu_git(ptree rev-parse "${prev}^{tree}")
