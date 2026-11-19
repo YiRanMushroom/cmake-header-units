@@ -336,6 +336,9 @@ defined before the include take effect. Use it for the one source of an stb-styl
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
 * Clang itself marks header units experimental; the module silences `-Wexperimental-header-units`.
+* Clang with libc++ from the Debian or apt.llvm.org packages and CMake 4.5: the configure of every C++20 project fails,
+  with or without this module, unless `CMAKE_CXX_STDLIB_MODULES_JSON` names
+  `/usr/lib/llvm-<version>/lib/libc++.modules.json` (see Tests, How to run).
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
@@ -456,7 +459,7 @@ How to run:
 **63/63 PASS** with each CMake version, on GCC 16.2, Clang 22 + libstdc++ 16 and Clang 22 + libc++ 22 (`TC=libcxx`,
 new). The module needed no change for libc++. Before the tests used fmt header-only with libc++, the three tests that
 use fmt (t02, t08, t11) failed to link; with CMake 4.5.0 and without `CMAKE_CXX_STDLIB_MODULES_JSON`, every libc++
-configure failed (see How to run).
+test except t09 failed at configure (see How to run).
 
 `import std` with CMake 4.5.0 on Linux: a target that imports `std` and a header unit whose header includes `<string>`
 builds and runs with GCC 16.2, Clang 22 + libstdc++ and Clang 22 + libc++, as does the same target without header
