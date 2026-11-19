@@ -4,12 +4,15 @@
 #   the set's object file, through hu-mapper (hu-mapper.cpp, built at configure time): it gives GCC the CMI to write and
 #   keeps every #include in the header textual, also one of the header itself (CMIs independent of build order).
 #   Cross-compiling (or HU_GCC_WRAPPERS ON), the header is compiled from a wrapper instead (_hu_gcc_wrapper).
-# * A consumer source gets a per-source mapper (g++-mapper-server) that lists its header units; GCC then also
-#   translates an #include of a listed header into an import.
-# * CMake's internal CMAKE_CXX_MODULE_MAP_FLAG is overridden so that the compile serves CMake's named-module map and
-#   the source's header-unit map together (CMAKE-INTERNAL).
+# * A consumer source gets a map of its header units (one per distinct content, found through hu-index.txt); GCC then
+#   also translates an #include of a listed header into an import.  CMake's internal CMAKE_CXX_MODULE_MAP_FLAG is
+#   overridden so that the compile serves CMake's named-module map and the source's header-unit map together
+#   (CMAKE-INTERNAL): through hu-mapper ("-c"), or without it through a script (gcc-mapper.sh / gcc-mapper.cmd) and
+#   g++-mapper-server.
 # * Mapper files spell CMIs relative to the top build dir ("$root ."), so depfiles name the same Ninja nodes, and are
-#   written with "\n" line ends (NEWLINE_STYLE UNIX): GCC's mapper-file reader takes a "\r" as part of a word.
+#   written with "\n" line ends (NEWLINE_STYLE UNIX): GCC's mapper-file reader takes a "\r" as part of a word.  For
+#   hu-mapper a path with a blank or a quote is quoted as in GCC's protocol (_hu_gcc_line); GCC's own reader has no
+#   quoting, so without hu-mapper a header path must not contain blanks.
 #
 # The macros below run in the scope of the Core.cmake function that calls them (cmake_language(CALL _hu_GCC_...)).
 
@@ -25,83 +28,37 @@ if(NOT IS_ABSOLUTE "${_hu_srv}" OR NOT EXISTS "${_hu_srv}")
   message(FATAL_ERROR "HeaderUnits: '${CMAKE_CXX_COMPILER} -print-prog-name=g++-mapper-server' gave '${_hu_srv}', not an existing file.")
 endif()
 set_property(GLOBAL PROPERTY _HU_GCC_SERVER "${_hu_srv}")
-# hu-mapper, the mapper of a header unit's own compile: built once per build tree.  Natively with this compiler;
-# cross-compiling with a host compiler (HU_HOST_CXX, else c++ / g++ / clang++ on the host's PATH), kept only if the
-# result runs here.  With HU_GCC_WRAPPERS ON, or without a working host program, header units are compiled from
-# wrappers (_hu_gcc_wrapper), which needs no program.
-set(_hu_mapper "")
-if(NOT HU_GCC_WRAPPERS)
-  set(_hu_msrc "${CMAKE_CURRENT_LIST_DIR}/hu-mapper.cpp")
-  set(_hu_mexe "${_HU_DIR}/hu-mapper")
-  if(CMAKE_HOST_WIN32)
-    string(APPEND _hu_mexe ".exe")
-  endif()
-  set(_hu_mcxx "")
-  set(_hu_a1)
-  if(NOT CMAKE_CROSSCOMPILING)
-    set(_hu_mcxx "${CMAKE_CXX_COMPILER}")
-    if(CMAKE_CXX_COMPILER_ARG1)
-      separate_arguments(_hu_a1 NATIVE_COMMAND "${CMAKE_CXX_COMPILER_ARG1}")
-    endif()
-  elseif(HU_HOST_CXX)
-    set(_hu_mcxx "${HU_HOST_CXX}")
-  else()
-    unset(_hu_found)                     # (find_program does not search when its variable is already set)
-    find_program(_hu_found NAMES c++ g++ clang++ NO_CACHE NO_CMAKE_FIND_ROOT_PATH)
-    if(_hu_found)
-      set(_hu_mcxx "${_hu_found}")
-    endif()
-  endif()
-  if(_hu_mcxx AND (NOT EXISTS "${_hu_mexe}" OR "${_hu_msrc}" IS_NEWER_THAN "${_hu_mexe}"))
-    set(_hu_mflags -std=c++17 -O1 -static-libstdc++ -static-libgcc)
-    if(CMAKE_HOST_WIN32)
-      list(APPEND _hu_mflags -static)    # no DLLs to find when GCC starts it (Ninja's PATH may lack the compiler's bin)
-    endif()
-    file(MAKE_DIRECTORY "${_HU_DIR}")
-    execute_process(COMMAND "${_hu_mcxx}" ${_hu_a1} ${_hu_mflags} -o "${_hu_mexe}" "${_hu_msrc}"
-                    RESULT_VARIABLE _hu_rc OUTPUT_VARIABLE _hu_out ERROR_VARIABLE _hu_out)
-    if(_hu_rc EQUAL 0 AND CMAKE_CROSSCOMPILING)
-      # it must run on this host: an empty map and no requests
-      file(WRITE "${_HU_DIR}/hu-mapper-check.map" "")
-      execute_process(COMMAND "${_hu_mexe}" "${_HU_DIR}/hu-mapper-check.map" INPUT_FILE "${_HU_DIR}/hu-mapper-check.map"
-                      RESULT_VARIABLE _hu_rc OUTPUT_VARIABLE _hu_o2 ERROR_VARIABLE _hu_o2)
-      string(APPEND _hu_out "${_hu_o2}")
-    endif()
-    if(_hu_rc EQUAL 0)
-      if(CMAKE_CROSSCOMPILING)
-        message(STATUS "HeaderUnits: built ${_hu_mexe} with the host compiler ${_hu_mcxx}")
-      else()
-        message(STATUS "HeaderUnits: built ${_hu_mexe}")
-      endif()
-    else()
-      file(REMOVE "${_hu_mexe}")
-      message(WARNING "HeaderUnits: could not build hu-mapper with ${_hu_mcxx} (${_hu_rc}); header units are compiled "
-        "from wrappers:\n${_hu_out}")
-    endif()
-  elseif(NOT _hu_mcxx)
-    message(STATUS "HeaderUnits: cross-compiling without a host C++ compiler (HU_HOST_CXX): header units are compiled "
-      "from wrappers")
-  endif()
-  if(_hu_mcxx AND EXISTS "${_hu_mexe}")
-    set(_hu_mapper "${_hu_mexe}")
-  endif()
+# hu-mapper (Common.cmake, _hu_build_helper) is the mapper of header units and consumers.  With HU_GCC_WRAPPERS ON, or
+# without a working program, header units are compiled from wrappers (_hu_gcc_wrapper) and consumers use
+# g++-mapper-server through a script.
+get_property(_hu_mapper GLOBAL PROPERTY _HU_HELPER)
+if(HU_GCC_WRAPPERS)
+  set(_hu_mapper "")
 endif()
 set_property(GLOBAL PROPERTY _HU_GCC_MAPPER "${_hu_mapper}")
-unset(_hu_mapper)
-# Compile-time module mapper: CMake's per-TU .modmap (named modules) + this TU's header-unit map, if any.
-# $1 = CMake's <MODULE_MAP_FILE>, $2 = the TU's source path (Ninja's $in; relative = inside the build dir).
-if(CMAKE_HOST_WIN32)
-  # Windows (MinGW): Ninja starts commands with CreateProcess, no shell, so the mapper is a cmd script.  $1 = CMake's
-  # modmap, $2 = the TU's source.  The TU's header-unit map is looked up in src-index.txt ("<source>|<map>" per line,
-  # _hu_gcc_src_map), read in the cmd process itself: maps have short names, as paths past 260 characters do not open.
+get_property(_hu_cfg GLOBAL PROPERTY _HU_CFG)
+if(_hu_cfg AND NOT _hu_mapper)
+  message(FATAL_ERROR "HeaderUnits: with GCC and Ninja Multi-Config, hu-mapper is required (not HU_GCC_WRAPPERS, and a "
+    "host compiler when cross-compiling): the wrappers and scripts of the fallback have no per-configuration maps.")
+endif()
+if(NOT _hu_mapper AND CMAKE_HOST_WIN32 AND _HU_DIR MATCHES "[&|<>^%,;=]")
+  message(FATAL_ERROR "HeaderUnits: with GCC on Windows and without hu-mapper the build directory must not contain any of "
+    "& | < > ^ % , ; = (the module mapper runs through cmd.exe, which splits or interprets them).")
+endif()
+# Without hu-mapper, the compile-time module mapper is a script: CMake's per-TU .modmap (named modules) + this TU's
+# header-unit map, if any.  $1 = CMake's <MODULE_MAP_FILE>, $2 = the TU's source path (Ninja's $in).  The map is the one
+# hu-index.txt ("<source>|<map>" per line, _hu_GCC_consumers_done) gives exactly that spelling of the source.
+if(_hu_mapper)
+elseif(CMAKE_HOST_WIN32)
+  # Windows (MinGW): Ninja starts commands with CreateProcess, no shell, so the mapper is a cmd script.  The index is
+  # read in the cmd process itself.
   file(TO_NATIVE_PATH "${_hu_srv}" _hu_srv_native)
-  file(TO_NATIVE_PATH "${_HU_DIR}/src-index.txt" _hu_index_native)
+  file(TO_NATIVE_PATH "${_HU_DIR}/hu-index.txt" _hu_index_native)
   file(CONFIGURE OUTPUT "${_HU_DIR}/gcc-mapper.cmd" @ONLY CONTENT [=[@echo off
 rem Generated by HeaderUnits.cmake -- do not edit.
 setlocal
-set "s=%~f2"
 set "m="
-if exist "@_hu_index_native@" for /f "usebackq tokens=1,* delims=|" %%a in ("@_hu_index_native@") do if /i "%%a"=="%s%" set "m=%%b"
+if exist "@_hu_index_native@" for /f "usebackq tokens=1,* delims=|" %%a in ("@_hu_index_native@") do if "%%a"=="%~2" set "m=%%b"
 if not defined m goto plain
 "@_hu_srv_native@" - "%~1" "%m%"
 exit /b %errorlevel%
@@ -111,30 +68,48 @@ exit /b %errorlevel%
 ]=] NEWLINE_STYLE CRLF)
   unset(_hu_srv_native)
   unset(_hu_index_native)
-endif()
+else()
 file(CONFIGURE OUTPUT "${_HU_DIR}/gcc-mapper.sh" @ONLY CONTENT [=[#!/bin/sh
 # Generated by HeaderUnits.cmake -- do not edit.
-case "$2" in /*) src="$2" ;; *) src="$PWD/$2" ;; esac
-map="@_HU_DIR@/src$src.map"
-if [ -f "$map" ]; then exec "@_hu_srv@" - "$1" "$map"; fi
+map=
+if [ -f "@_HU_DIR@/hu-index.txt" ]; then
+  while IFS= read -r line; do
+    case "$line" in "$2|"*) map=${line#"$2|"}; break ;; esac
+  done < "@_HU_DIR@/hu-index.txt"
+fi
+if [ -n "$map" ]; then exec "@_hu_srv@" - "$1" "$map"; fi
 exec "@_hu_srv@" - "$1"
 ]=] NEWLINE_STYLE UNIX)
+endif()
 # CMAKE-INTERNAL: CMAKE_CXX_MODULE_MAP_FLAG is CMake's private template for the GCC module-mapper option of
 # its scanned compile rule (Modules/Compiler/GNU-CXX.cmake).  We replace "-fmodule-mapper=<MODULE_MAP_FILE>"
-# by a mapper *program* (gcc-mapper.sh -> g++-mapper-server) that serves CMake's modmap PLUS the TU's
+# by a mapper *program* (hu-mapper, or gcc-mapper.sh -> g++-mapper-server) that serves CMake's modmap PLUS the TU's
 # header-unit map.  "$in" is a Ninja variable (the source of the compile edge) injected into CMake's rule;
-# CMake writes sources as absolute paths, or relative to the top build dir when inside it (gcc-mapper.sh
-# handles both).
+# CMake writes a source as its absolute path, also inside the build dir, which is how hu-index.txt names it.
 set(_hu_old "${CMAKE_CXX_MODULE_MAP_FLAG}")
 string(FIND "${_hu_old}" "-fmodule-mapper=<MODULE_MAP_FILE>" _hu_pos)
 if(_hu_pos LESS 0)
   message(FATAL_ERROR "HeaderUnits: CMAKE_CXX_MODULE_MAP_FLAG='${_hu_old}' does not contain '-fmodule-mapper=<MODULE_MAP_FILE>'; "
     "this CMake version changed its internal GCC module rule, GCC header units cannot be supported.")
 endif()
-if(CMAKE_HOST_WIN32)
-  # Double quotes (the compiler's own argv parsing) and $out.modmap instead of <MODULE_MAP_FILE>: CMake spells that one
-  # with backslashes on Windows, which GCC's mapper-argument splitter takes as escapes.  CMAKE-INTERNAL (observed):
-  # CMake's modmap is the object path plus ".modmap", and $out is the object alone (BMIs are dyndep outputs).
+# Windows: double quotes (the compiler's own argv parsing) and $out.modmap instead of <MODULE_MAP_FILE>: CMake spells
+# that one with backslashes on Windows, which GCC's mapper-argument splitter takes as escapes.  CMAKE-INTERNAL
+# (observed): CMake's modmap is the object path plus ".modmap", and $out is the object alone (BMIs are dyndep outputs).
+# With hu-mapper no shell or cmd.exe runs in between.  Ninja Multi-Config: hu-index.txt per configuration, named with
+# the Ninja variable CONFIG of the compile edge (CMAKE-INTERNAL, observed: CMake's multi-config edges set it).
+set(_hu_index "${_HU_DIR}/hu-index.txt")
+if(_hu_cfg)
+  set(_hu_index "${_HU_DIR}/$CONFIG/hu-index.txt")
+endif()
+if(_hu_mapper AND CMAKE_HOST_WIN32)
+  string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
+         "\"-fmodule-mapper=|${_hu_mapper} -c $out.modmap ${_hu_index} $in\""
+         CMAKE_CXX_MODULE_MAP_FLAG "${_hu_old}")
+elseif(_hu_mapper)
+  string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
+         "'-fmodule-mapper=|${_hu_mapper} -c <MODULE_MAP_FILE> ${_hu_index} $in'"
+         CMAKE_CXX_MODULE_MAP_FLAG "${_hu_old}")
+elseif(CMAKE_HOST_WIN32)
   string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
          "\"-fmodule-mapper=|cmd /c ${_HU_DIR}/gcc-mapper.cmd $out.modmap $in\""
          CMAKE_CXX_MODULE_MAP_FLAG "${_hu_old}")
@@ -146,29 +121,27 @@ endif()
 set_property(GLOBAL PROPERTY _HU_GCC_MAP_FLAG "${CMAKE_CXX_MODULE_MAP_FLAG}")
 unset(_hu_old)
 unset(_hu_pos)
+unset(_hu_cfg)
+unset(_hu_index)
 unset(_hu_srv)
+unset(_hu_mapper)
 
-# The header-unit map of consumer source `src` (the per-TU mapper serves it): src/<path>.map (gcc-mapper.sh finds it
-# by the source), or on Windows s/<hash>.map, listed in src-index.txt, which gcc-mapper.cmd reads (a name past 260
-# characters would not open there).
-function(_hu_gcc_src_map out hudir src)
-  if(CMAKE_HOST_WIN32)
-    string(MD5 h "${src}")
-    string(SUBSTRING "${h}" 0 16 h)
-    set(map "${hudir}/s/${h}.map")
-    file(TO_NATIVE_PATH "${src}" nsrc)
-    file(TO_NATIVE_PATH "${map}" nmap)
-    get_property(index GLOBAL PROPERTY _HU_GCC_SRC_INDEX)
-    if(NOT "${nsrc}|${nmap}" IN_LIST index)
-      set_property(GLOBAL APPEND PROPERTY _HU_GCC_SRC_INDEX "${nsrc}|${nmap}")
-      get_property(index GLOBAL PROPERTY _HU_GCC_SRC_INDEX)
-      string(JOIN "\n" text ${index})
-      file(CONFIGURE OUTPUT "${hudir}/src-index.txt" CONTENT "${text}\n" NEWLINE_STYLE CRLF)
+# A line of a map file from its words (ARGN).  hu-mapper reads words as GCC's protocol spells them, so for it a word
+# with a blank or a quote is quoted ('...', with \\ and \' escaped); GCC's own reader (without hu-mapper) has no
+# quoting, and header paths have no blanks there (_hu_GCC_add_header).
+function(_hu_gcc_line out)
+  get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+  set(ws)
+  foreach(w IN LISTS ARGN)
+    if(mapper AND w MATCHES "[ \t']")
+      string(REPLACE "\\" "\\\\" w "${w}")
+      string(REPLACE "'" "\\'" w "${w}")
+      set(w "'${w}'")
     endif()
-    set(${out} "${map}" PARENT_SCOPE)
-  else()
-    set(${out} "${hudir}/src${src}.map" PARENT_SCOPE)
-  endif()
+    list(APPEND ws "${w}")
+  endforeach()
+  string(JOIN " " line ${ws})
+  set(${out} "${line}\n" PARENT_SCOPE)
 endfunction()
 
 # GCC names a header unit by its own spelling of the path, and the mapper is keyed by it.  For a compile whose search
@@ -209,9 +182,11 @@ function(_hu_gcc_self_lines out p name cmi)
     file(RELATIVE_PATH rp "${CMAKE_BINARY_DIR}" "${p}")
     list(APPEND keys "${rp}" "./${rp}")
   endif()
-  set(lines "$root .\n$export ${cmi}\n")
+  _hu_gcc_line(lines "$export" "${cmi}")
+  string(PREPEND lines "$root .\n")
   foreach(k IN LISTS keys)
-    string(APPEND lines "$textual ${k}\n")
+    _hu_gcc_line(l "$textual" "${k}")
+    string(APPEND lines "${l}")
   endforeach()
   set(${out} "${lines}" PARENT_SCOPE)
 endfunction()
@@ -244,8 +219,10 @@ macro(_hu_GCC_add_header)
       message(FATAL_ERROR "add_header_units(${set}): GCC resolves <${h}> to '${p}', which is not a normalized absolute "
         "path. CMake would compile '${np}', a different header-unit identity for GCC. Not supported.")
     endif()
-    if(p MATCHES "[ \t]")
-      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); GCC's mapper files cannot express it.")
+    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(NOT mapper AND p MATCHES "[ \t]")
+      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); without hu-mapper "
+        "(HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files cannot express it.")
     endif()
     file(REAL_PATH "${p}" rpo)
     string(MD5 ok "${rpo}")
@@ -259,25 +236,26 @@ macro(_hu_GCC_add_header)
     # convention), so GCC's depfiles name the same Ninja node: an absolute spelling would be a different node, and
     # importers that know the CMI only from their depfile (CMake's synthesized BMI targets, #28166) would see a
     # header edit one ninja run late.  CMAKE-INTERNAL: object location, see the Clang branch below.
-    set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/${cfg}hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
     file(RELATIVE_PATH rcmi "${CMAKE_BINARY_DIR}" "${cmi}")
     if(CMAKE_HOST_WIN32)
       string(MD5 hh "${p}")
       string(SUBSTRING "${hh}" 0 16 hh)
-      set(hmap "${hudir}/gcc/${hh}.map")   # short: a path past 260 characters would not open
+      set(hmap "${hudir}/gcc/${cfg}${hh}.map")   # short: a path past 260 characters would not open
     else()
-      set(hmap "${hudir}/gcc/${set}/${oname}.map")
+      set(hmap "${hudir}/gcc/${cfg}${set}/${oname}.map")
     endif()
     # Keys: the spellings GCC may use for this header with the set's search list (consumers get their own, at the end).
     _hu_gcc_keys(hkeys "${p}" "${h}" DIRS ${S_DIRS} RAW ${S_RAW})
     set(keys "")
     foreach(kk IN LISTS hkeys)
-      string(APPEND keys "${kk} ${rcmi}\n")
+      _hu_gcc_line(l "${kk}" "${rcmi}")
+      string(APPEND keys "${l}")
     endforeach()
     # The header unit's own mapper makes GCC translate no #include inside it into an import (CMI content independent of
     # build order), not even one of the header itself: hu-mapper answers the export with the CMI and an #include of the
     # header (each spelling) with "textual"; without hu-mapper, the wrapper is compiled and only it is listed.
-    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
     if(mapper)
       set(hsrc "${p}")
       _hu_gcc_self_lines(hlines "${p}" "${h}" "${rcmi}" DIRS ${S_DIRS} RAW ${S_RAW})
@@ -290,7 +268,7 @@ macro(_hu_GCC_add_header)
       endforeach()
       set(mopt "-fmodule-mapper=${hmap}")
     endif()
-    file(CONFIGURE OUTPUT "${hmap}" CONTENT "${hlines}" NEWLINE_STYLE UNIX)
+    _hu_write("${hmap}" "${hlines}" UNIX)
     list(APPEND hmaps "${hmap}")
     string(APPEND maplines "${keys}")
     set_source_files_properties("${hsrc}" TARGET_DIRECTORY ${set} PROPERTIES
@@ -324,7 +302,8 @@ macro(_hu_GCC_header_import_dep)
     file(RELATIVE_PATH rdb "${CMAKE_BINARY_DIR}" "${DEP_BMI}")
     _hu_gcc_keys(dkeys "${DEP_PATH}" "${n}" DIRS ${sdirs} RAW ${sraws})
     foreach(kk IN LISTS dkeys)
-      string(APPEND maplines "${kk} ${rdb}\n")
+      _hu_gcc_line(l "${kk}" "${rdb}")
+      string(APPEND maplines "${l}")
     endforeach()
 endmacro()
 
@@ -342,7 +321,7 @@ macro(_hu_GCC_header_import_done)
         string(APPEND selfl "${kk} ${rb0}\n")
       endforeach()
     endif()
-    file(CONFIGURE OUTPUT "${hmap}" CONTENT "${selfl}${maplines}" NEWLINE_STYLE UNIX)
+    _hu_write("${hmap}" "${selfl}${maplines}" UNIX)
 endmacro()
 
 # _hu_finalize(), per consumer source: in: t, src, tsets, hudir; appends opts and deps.
@@ -350,36 +329,89 @@ macro(_hu_GCC_consumer_options)
     if(src MATCHES "[ \t]")
       message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains a space; GCC's mapper cannot express it.")
     endif()
+    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(NOT mapper AND CMAKE_HOST_WIN32 AND src MATCHES "[&|<>^%,;=]")
+      message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains one of & | < > ^ % , ; =; with GCC "
+        "on Windows and without hu-mapper the module mapper runs through cmd.exe, which splits or interprets them.")
+    endif()
     get_property(srv GLOBAL PROPERTY _HU_GCC_SERVER)
     # Keys by the consumer's own search list: which directory (and so which spelling) GCC uses is the consumer's.
     string(MD5 tk "${t}")
     if(NOT DEFINED _hu_cs_${tk}_DIRS)
       _hu_target_search(_hu_cs_${tk} ${t})
+      string(MD5 _hu_cs_${tk}_KEY "${_hu_cs_${tk}_DIRS}|${_hu_cs_${tk}_RAW}")
     endif()
-    set(content "")
-    foreach(s IN LISTS tsets)
-      get_property(hs GLOBAL PROPERTY _HU_SET_${s}_HEADERS)
-      get_property(ps GLOBAL PROPERTY _HU_SET_${s}_PATHS)
-      get_property(c GLOBAL PROPERTY _HU_SET_${s}_CMIS)
-      foreach(h p cmi IN ZIP_LISTS hs ps c)
-        if(hu_textual AND NOT p IN_LIST hu_only)
-          continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
-        endif()
-        file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
-        _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
-        foreach(kk IN LISTS pkeys)
-          string(APPEND content "${kk} ${rc}\n")
+    # The map's content depends only on the search list and the sets, so it is computed once per such pair (not per
+    # source), and each header's keys once per search list: _hu_gcc_keys queries the file system.  (Variables of the
+    # calling _hu_finalize_run, which runs once.)
+    string(MD5 _hu_gck "${_hu_cs_${tk}_KEY}|${tsets}")
+    if(NOT hu_textual AND DEFINED _hu_gc_${_hu_gck})
+      set(content "${_hu_gc_${_hu_gck}}")
+      list(APPEND deps ${_hu_gd_${_hu_gck}})
+    else()
+      set(content "")
+      set(_hu_gdeps)
+      foreach(s IN LISTS tsets)
+        get_property(hs GLOBAL PROPERTY _HU_SET_${s}_HEADERS)
+        get_property(ps GLOBAL PROPERTY _HU_SET_${s}_PATHS)
+        get_property(c GLOBAL PROPERTY _HU_SET_${s}_CMIS)
+        foreach(h p cmi IN ZIP_LISTS hs ps c)
+          if(hu_textual AND NOT p IN_LIST hu_only)
+            continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
+          endif()
+          string(MD5 _hu_gkk "${_hu_cs_${tk}_KEY}|${p}|${h}")
+          if(NOT DEFINED _hu_gk_${_hu_gkk})
+            file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
+            _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
+            set(_hu_gk_${_hu_gkk} "")
+            foreach(kk IN LISTS pkeys)
+              _hu_gcc_line(l "${kk}" "${rc}")
+              string(APPEND _hu_gk_${_hu_gkk} "${l}")
+            endforeach()
+          endif()
+          string(APPEND content "${_hu_gk_${_hu_gkk}}")
+          list(APPEND _hu_gdeps "${cmi}")
         endforeach()
-        list(APPEND deps "${cmi}")
       endforeach()
-    endforeach()
-    _hu_gcc_src_map(smap "${hudir}" "${src}")
-    file(CONFIGURE OUTPUT "${smap}" CONTENT "$root .\n${content}" NEWLINE_STYLE UNIX)
+      list(APPEND deps ${_hu_gdeps})
+      if(NOT hu_textual)
+        set(_hu_gc_${_hu_gck} "${content}")
+        set(_hu_gd_${_hu_gck} "${_hu_gdeps}")
+      endif()
+    endif()
     # CMAKE-INTERNAL (observed): CMake's GCC scan rule passes no -fmodule-mapper of its own.
-    # Dependency scan: this option lets the scan see the header
-    # units (GCC must load them for their macros).  -f: unknown (named) modules get fallback names instead
-    # of an error; the scan never reads named-module CMIs.  In the compile command this option is
-    # overridden by the later mapper of CMAKE_CXX_MODULE_MAP_FLAG (gcc-mapper.sh serving the same map).
-    list(APPEND opts "-fmodule-mapper=|${srv} -f - ${smap}")
+    # Dependency scan: this option lets the scan see the header units (GCC must load them for their macros); unknown
+    # (named) modules get fallback names instead of an error (hu-mapper -s, g++-mapper-server -f), as the scan never
+    # reads named-module CMIs.  In the compile command this option is overridden by the later mapper of
+    # CMAKE_CXX_MODULE_MAP_FLAG, which serves the same map.
+    # One map per distinct content, found by the compile through hu-index.txt (hu-mapper -c, or the script).
+    string(MD5 _hu_gmk "${content}")
+    string(SUBSTRING "${_hu_gmk}" 0 16 _hu_gmk)
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    set(smap "${hudir}/gcc-m/${cfg}${_hu_gmk}.map")
+    if(NOT DEFINED _hu_gw_${_hu_gmk})
+      set(_hu_gw_${_hu_gmk} 1)
+      _hu_write("${smap}" "$root .\n${content}" UNIX)
+    endif()
+    string(MD5 _hu_gsk "${src}")
+    get_property(known GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk} SET)
+    if(NOT known)
+      set_property(GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk} 1)
+      # keyed by Ninja's $in (CMAKE-INTERNAL: the Ninja generator passes a compiled source by its absolute path, also
+      # inside the build tree; t12 has such a source)
+      set_property(GLOBAL APPEND_STRING PROPERTY _HU_GCC_HU_INDEX "${src}|${smap}\n")
+    endif()
+    if(mapper)
+      list(APPEND opts "-fmodule-mapper=|${mapper} -s ${smap}")
+    else()
+      list(APPEND opts "-fmodule-mapper=|${srv} -f - ${smap}")
+    endif()
+endmacro()
+
+# _hu_finalize(), after every consumer source: write hu-index.txt, which hu-mapper -c or the script reads.
+macro(_hu_GCC_consumers_done)
+    get_property(index GLOBAL PROPERTY _HU_GCC_HU_INDEX)
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    _hu_write("${hudir}/${cfg}hu-index.txt" "${index}" UNIX)
 endmacro()
 

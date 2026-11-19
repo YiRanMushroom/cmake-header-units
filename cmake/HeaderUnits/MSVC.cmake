@@ -5,11 +5,6 @@
 
 include_guard(GLOBAL)
 
-if(NOT CMAKE_GENERATOR MATCHES "^Visual Studio")
-  message(FATAL_ERROR "HeaderUnits: with MSVC use a Visual Studio generator (MSBuild builds header units itself); "
-    "CMake's '${CMAKE_GENERATOR}' generator does not support header units with MSVC.")
-endif()
-
 function(add_header_units set)
   cmake_parse_arguments(PARSE_ARGV 1 A "" "CXX_STANDARD;CXX_EXTENSIONS;POSITION_INDEPENDENT_CODE"
     "HEADERS;LINK_LIBRARIES;COMPILE_DEFINITIONS;COMPILE_OPTIONS;INCLUDE_DIRECTORIES")

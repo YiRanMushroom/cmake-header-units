@@ -13,8 +13,9 @@
 #   set(HU_ALLOW_HEADER_IMPORTS ON)   # experimental: header units whose headers import header units
 #
 # Toolchains:
-#   GCC 16 (libstdc++) and Clang 22 (GNU-style driver; libstdc++ or the MSVC STL) with the Ninja generator: the
-#   module builds the header units (HeaderUnits/GCC.cmake, HeaderUnits/Clang.cmake).
+#   GCC 16 (libstdc++), Clang 22 (clang++ with libstdc++, libc++ or the MSVC STL; clang-cl with the MSVC STL) and MSVC
+#   19.40+ with the Ninja generator: the module builds the header units (HeaderUnits/GCC.cmake, Clang.cmake,
+#   MSVCNinja.cmake).
 #   MSVC with a Visual Studio generator: MSBuild builds them; the commands do nothing (HeaderUnits/MSVC.cmake).
 #
 # Every place that relies on CMake internals or on undocumented CMake behaviour (unsupported, may break with any
@@ -26,7 +27,7 @@ if(NOT CMAKE_CXX_COMPILER_LOADED)
   message(FATAL_ERROR "HeaderUnits: include it after project() with the CXX language enabled.")
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND CMAKE_GENERATOR MATCHES "^Visual Studio")
   if(CMAKE_VERSION VERSION_LESS 3.28)
     message(FATAL_ERROR "HeaderUnits: CMake >= 3.28 is required (C++20 module scanning with MSBuild).")
   endif()
@@ -37,8 +38,9 @@ endif()
 if(CMAKE_VERSION VERSION_LESS 4.2)
   message(FATAL_ERROR "HeaderUnits: CMake >= 4.2 is required (OBJECT_NAME source property).")
 endif()
-if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
-  message(FATAL_ERROR "HeaderUnits: with GCC and Clang only the single-config Ninja generator is supported (found '${CMAKE_GENERATOR}').")
+if(NOT CMAKE_GENERATOR MATCHES "^Ninja( Multi-Config)?$")
+  message(FATAL_ERROR "HeaderUnits: with GCC, Clang and MSVC only the Ninja generators are supported (Ninja; Ninja "
+    "Multi-Config with GCC and Clang; MSVC: also a Visual Studio generator) (found '${CMAKE_GENERATOR}').")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -46,16 +48,37 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
     message(WARNING "HeaderUnits: tested with GCC 16 only (found ${CMAKE_CXX_COMPILER_VERSION}).")
   endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
-  set(_HU_TC Clang)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT MATCHES "^(GNU|MSVC)$")
+  set(_HU_TC Clang)          # clang++ and clang-cl (the MSVC-style driver) alike
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
     message(WARNING "HeaderUnits: tested with Clang 22 only (found ${CMAKE_CXX_COMPILER_VERSION}).")
   endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+  set(_HU_TC MSVC)
+  if(MSVC_VERSION LESS 1940)
+    message(FATAL_ERROR "HeaderUnits: with Ninja, MSVC 19.40 (Visual Studio 2022 17.10) or later is required (/ifcOnly); "
+      "found ${CMAKE_CXX_COMPILER_VERSION}.")
+  endif()
 else()
   message(FATAL_ERROR "HeaderUnits: unsupported compiler '${CMAKE_CXX_COMPILER_ID}' "
-    "(frontend '${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}'). Supported: GCC, and Clang with the GNU-style driver "
-    "(clang++, not clang-cl), both with Ninja, and MSVC with a Visual Studio generator. clang-cl is not supported.")
+    "(frontend '${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}'). Supported: GCC, Clang (clang++ or clang-cl) and MSVC with "
+    "Ninja, and MSVC with a Visual Studio generator.")
 endif()
+get_property(_hu_multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_hu_multi AND _HU_TC STREQUAL "MSVC")
+  message(FATAL_ERROR "HeaderUnits: MSVC with Ninja Multi-Config is not supported: Ninja learns what an MSVC compile "
+    "read from /showIncludes, which lists no header units (IFCs), so a consumer would not be rebuilt when a header unit "
+    "changes (the single-config Ninja build lists them with OBJECT_DEPENDS, which takes no per-configuration paths). "
+    "Use the Ninja generator (a build directory per configuration) or a Visual Studio generator.")
+endif()
+# Ninja Multi-Config: a BMI per configuration (objects go to CMakeFiles/<target>.dir/<config>/), so the paths of BMIs and
+# of the files that name them contain "$<CONFIG>/" (_HU_CFG) and those files are written per configuration (_hu_write).
+if(_hu_multi)
+  set_property(GLOBAL PROPERTY _HU_CFG "$<CONFIG>/")
+else()
+  set_property(GLOBAL PROPERTY _HU_CFG "")
+endif()
+unset(_hu_multi)
 set(_HU_DIR "${CMAKE_BINARY_DIR}/CMakeFiles/header_units")
 set_property(GLOBAL PROPERTY _HU_TC "${_HU_TC}")
 set_property(GLOBAL PROPERTY _HU_DIR "${_HU_DIR}")
@@ -63,8 +86,17 @@ set_property(GLOBAL PROPERTY _HU_DIR "${_HU_DIR}")
 # Spelled with CMAKE_CURRENT_LIST_DIR (not a variable of our own) so that IDEs which follow include() (CLion's CMake
 # completion) find the commands defined in these files.
 include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Common.cmake")
+# HU_NATIVE_SCAN (default ON): imports are scanned by hu-mapper; OFF: by CMake (the same result, slower).
+if(DEFINED HU_NATIVE_SCAN AND NOT HU_NATIVE_SCAN)
+  set_property(GLOBAL PROPERTY _HU_NATIVE_SCAN OFF)
+else()
+  set_property(GLOBAL PROPERTY _HU_NATIVE_SCAN ON)
+endif()
+_hu_build_helper()
 if(_HU_TC STREQUAL "GCC")      # toolchain setup and strategy macros
   include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/GCC.cmake")
+elseif(_HU_TC STREQUAL "MSVC")
+  include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/MSVCNinja.cmake")
 else()
   include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Clang.cmake")
 endif()
