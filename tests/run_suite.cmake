@@ -1583,6 +1583,7 @@ function(test_t24_two_sets bdir)
     fail("the BMI deletion check ran ${nrebuilt} times, expected 2")
   endif()
   evid("2 sets of one directory with <vector> and <t24/val.h> (= <val.h>): 4 distinct BMIs built, each consumer's compile gets only its own set's, a deleted BMI is rebuilt alone with its consumer")
+endfunction()
 
 function(test_t25_shared_source bdir)
   hu_configure(t25_shared_source "${bdir}")
