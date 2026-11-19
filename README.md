@@ -41,7 +41,7 @@ no IFCs, so consumers would not rebuild when a header unit changes).
    include(FetchContent)
    FetchContent_Declare(cmake_header_units
      GIT_REPOSITORY https://github.com/YiRanMushroom/cmake-header-units.git
-     GIT_TAG        release               # a branch or tag; for a commit hash, drop GIT_SHALLOW
+     GIT_TAG        release               # the latest; or a version tag, e.g. v0.1.0 (for a commit hash, drop GIT_SHALLOW)
      GIT_SHALLOW    TRUE)
    FetchContent_MakeAvailable(cmake_header_units)
    list(APPEND CMAKE_MODULE_PATH "${cmake_header_units_SOURCE_DIR}/cmake")
@@ -67,6 +67,9 @@ no IFCs, so consumers would not rebuild when a header unit changes).
    ```sh
    cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++     # or clang++, or clang-cl (from a developer prompt)
    cmake --build build
+   # GCC / Clang, several configurations in one build directory:
+   cmake -S . -B build -G "Ninja Multi-Config" -DCMAKE_CXX_COMPILER=g++
+   cmake --build build --config Release
    # MSVC:
    cmake -S . -B build -G "Visual Studio 17 2022"
    cmake --build build --config Debug
@@ -422,7 +425,11 @@ just the module. Each of its commits names the main commit its files come from. 
 ```sh
 cmake -P tools/update_release_branch.cmake            # from HEAD; or -DFROM=<commit> before -P
 git push origin release
+git tag -a v<x.y.z> release -m "HeaderUnits.cmake v<x.y.z>" && git push origin v<x.y.z>   # a version
 ```
+
+Versions are tags on `release` commits, so `GIT_TAG v<x.y.z>` fetches only the module too. v0.1.0 (2026-11-19) is the
+first.
 
 ## Tests
 
