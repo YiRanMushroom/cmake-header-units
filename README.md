@@ -261,14 +261,16 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
   header-unit map together: GCC starts `hu-mapper -c <module map> <index> <source>`, which reads both and finds the
   source's map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. No shell or `cmd.exe` runs in
-  between, so paths may hold `, ; =` and the like (only blanks are excluded).
+  between, so paths may hold `, ; =` and the like. A header path may also hold blanks: `hu-mapper` reads its map
+  entries quoted as in GCC's protocol. Source paths and the build directory may not.
 * Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
   answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
 * Without `hu-mapper` (cross-compiling without a host compiler, or `HU_GCC_WRAPPERS`), consumers use GCC's
   `g++-mapper-server` through a script: `gcc-mapper.sh`, or on Windows `gcc-mapper.cmd` run through `cmd /c` (there a
   build directory or source path with `& | < > ^ % , ; =` is rejected at configure time). The script finds the source's
-  map in `hu-index.txt`, so the maps are the same shared ones. Mapper files get short hashed names, because paths past
-  260 characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
+  map in `hu-index.txt`, so the maps are the same shared ones. GCC's own mapper-file reader has no quoting, so a header
+  path with blanks is rejected at configure time. Mapper files get short hashed names, because paths past 260
+  characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
 **Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
 
@@ -323,7 +325,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
   * BMIs cannot be moved to another location.
 * GCC:
   * one header unit per header per build tree;
-  * no spaces in source, header or build paths;
+  * no blanks in source paths or the build directory, and without `hu-mapper` none in header paths;
   * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
     reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
     predates the header lookup without `try_compile` (same failure with the earlier code).
@@ -402,7 +404,7 @@ Each test is a standalone CMake project with a one-line README:
 | t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`); both list a directory that does not exist first |
 | t19_scale | 5 and 40 targets, each with its own include directory and header: the number of compiler runs for the lookup is the same |
 | t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
-| t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler) |
+| t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler), and with its headers in a directory with a space (with `HU_GCC_WRAPPERS` a configure error) |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -443,6 +445,12 @@ How to run:
   `tests/attack/RESULTS.md`.
 
 ## Results
+
+**2026-11-19, GCC header paths with blanks; the shared maps without `hu-mapper`** (fresh build directories): GCC 16.2
+on Linux (CMake 4.4.5) and MinGW-w64 GCC 16.1 (CMake 4.5.0): t01, t03, t04, t10, t12, t14, t15, t17, t18 and t21 PASS,
+t21 with its headers in a directory with a space as well. The same tests except t21 also PASS with `HU_GCC_WRAPPERS` ON
+(a copy of the driver that adds the option), where consumers use the scripts and the shared maps. Clang 22 on Linux:
+t21 PASS. The other toolchains were not rerun.
 
 **2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
 10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way

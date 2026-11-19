@@ -10,7 +10,9 @@
 #   (CMAKE-INTERNAL): through hu-mapper ("-c"), or without it through a script (gcc-mapper.sh / gcc-mapper.cmd) and
 #   g++-mapper-server.
 # * Mapper files spell CMIs relative to the top build dir ("$root ."), so depfiles name the same Ninja nodes, and are
-#   written with "\n" line ends (NEWLINE_STYLE UNIX): GCC's mapper-file reader takes a "\r" as part of a word.
+#   written with "\n" line ends (NEWLINE_STYLE UNIX): GCC's mapper-file reader takes a "\r" as part of a word.  For
+#   hu-mapper a path with a blank or a quote is quoted as in GCC's protocol (_hu_gcc_line); GCC's own reader has no
+#   quoting, so without hu-mapper a header path must not contain blanks.
 #
 # The macros below run in the scope of the Core.cmake function that calls them (cmake_language(CALL _hu_GCC_...)).
 
@@ -166,6 +168,24 @@ unset(_hu_pos)
 unset(_hu_srv)
 unset(_hu_mapper)
 
+# A line of a map file from its words (ARGN).  hu-mapper reads words as GCC's protocol spells them, so for it a word
+# with a blank or a quote is quoted ('...', with \\ and \' escaped); GCC's own reader (without hu-mapper) has no
+# quoting, and header paths have no blanks there (_hu_GCC_add_header).
+function(_hu_gcc_line out)
+  get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+  set(ws)
+  foreach(w IN LISTS ARGN)
+    if(mapper AND w MATCHES "[ \t']")
+      string(REPLACE "\\" "\\\\" w "${w}")
+      string(REPLACE "'" "\\'" w "${w}")
+      set(w "'${w}'")
+    endif()
+    list(APPEND ws "${w}")
+  endforeach()
+  string(JOIN " " line ${ws})
+  set(${out} "${line}\n" PARENT_SCOPE)
+endfunction()
+
 # GCC names a header unit by its own spelling of the path, and the mapper is keyed by it.  For a compile whose search
 # list is DIRS (normalized) / RAW (as spelled: an -I directory as given, GCC on Linux keeps "dir/../inc"), <name> is
 # found in the first directory holding it: if that is the same file, the keys are that directory's spelling + "/<name>"
@@ -204,9 +224,11 @@ function(_hu_gcc_self_lines out p name cmi)
     file(RELATIVE_PATH rp "${CMAKE_BINARY_DIR}" "${p}")
     list(APPEND keys "${rp}" "./${rp}")
   endif()
-  set(lines "$root .\n$export ${cmi}\n")
+  _hu_gcc_line(lines "$export" "${cmi}")
+  string(PREPEND lines "$root .\n")
   foreach(k IN LISTS keys)
-    string(APPEND lines "$textual ${k}\n")
+    _hu_gcc_line(l "$textual" "${k}")
+    string(APPEND lines "${l}")
   endforeach()
   set(${out} "${lines}" PARENT_SCOPE)
 endfunction()
@@ -239,8 +261,10 @@ macro(_hu_GCC_add_header)
       message(FATAL_ERROR "add_header_units(${set}): GCC resolves <${h}> to '${p}', which is not a normalized absolute "
         "path. CMake would compile '${np}', a different header-unit identity for GCC. Not supported.")
     endif()
-    if(p MATCHES "[ \t]")
-      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); GCC's mapper files cannot express it.")
+    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(NOT mapper AND p MATCHES "[ \t]")
+      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); without hu-mapper "
+        "(HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files cannot express it.")
     endif()
     file(REAL_PATH "${p}" rpo)
     string(MD5 ok "${rpo}")
@@ -267,12 +291,12 @@ macro(_hu_GCC_add_header)
     _hu_gcc_keys(hkeys "${p}" "${h}" DIRS ${S_DIRS} RAW ${S_RAW})
     set(keys "")
     foreach(kk IN LISTS hkeys)
-      string(APPEND keys "${kk} ${rcmi}\n")
+      _hu_gcc_line(l "${kk}" "${rcmi}")
+      string(APPEND keys "${l}")
     endforeach()
     # The header unit's own mapper makes GCC translate no #include inside it into an import (CMI content independent of
     # build order), not even one of the header itself: hu-mapper answers the export with the CMI and an #include of the
     # header (each spelling) with "textual"; without hu-mapper, the wrapper is compiled and only it is listed.
-    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
     if(mapper)
       set(hsrc "${p}")
       _hu_gcc_self_lines(hlines "${p}" "${h}" "${rcmi}" DIRS ${S_DIRS} RAW ${S_RAW})
@@ -319,7 +343,8 @@ macro(_hu_GCC_header_import_dep)
     file(RELATIVE_PATH rdb "${CMAKE_BINARY_DIR}" "${DEP_BMI}")
     _hu_gcc_keys(dkeys "${DEP_PATH}" "${n}" DIRS ${sdirs} RAW ${sraws})
     foreach(kk IN LISTS dkeys)
-      string(APPEND maplines "${kk} ${rdb}\n")
+      _hu_gcc_line(l "${kk}" "${rdb}")
+      string(APPEND maplines "${l}")
     endforeach()
 endmacro()
 
@@ -381,7 +406,8 @@ macro(_hu_GCC_consumer_options)
             _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
             set(_hu_gk_${_hu_gkk} "")
             foreach(kk IN LISTS pkeys)
-              string(APPEND _hu_gk_${_hu_gkk} "${kk} ${rc}\n")
+              _hu_gcc_line(l "${kk}" "${rc}")
+              string(APPEND _hu_gk_${_hu_gkk} "${l}")
             endforeach()
           endif()
           string(APPEND content "${_hu_gk_${_hu_gkk}}")

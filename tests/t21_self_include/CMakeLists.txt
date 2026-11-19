@@ -6,9 +6,13 @@ include(HeaderUnits)
 
 # selfinc.h includes selfinc_core.h, which includes "selfinc.h" again (as fmt's core.h includes "format.h"): while
 # the header unit of selfinc.h is built, that nested #include names the header unit being built.  The value comes from
-# a file the test rewrites between builds (T21_VALUE in value.h).
+# a file the test rewrites between builds (T21_VALUE in value.h).  T21_INCLUDE_DIR: a copy of include/ elsewhere (the
+# test driver puts one in a directory with a space).
+if(NOT T21_INCLUDE_DIR)
+  set(T21_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+endif()
 add_executable(t21 main.cpp)
-target_include_directories(t21 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${T21_VALUE_DIR}")
+target_include_directories(t21 PRIVATE "${T21_INCLUDE_DIR}" "${T21_VALUE_DIR}")
 target_auto_header_units(t21)
 enable_testing()
 add_test(NAME t21 COMMAND t21)
