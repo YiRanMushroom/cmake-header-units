@@ -12,6 +12,7 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 |---|---|---|
 | GCC 16 + libstdc++ (Linux) | Ninja | this module |
 | Clang 22 + libstdc++ 16 (Linux) | Ninja | this module |
+| Clang 22 + libc++ 22 (Linux) | Ninja | this module |
 | Clang 22 (`clang++`, GNU-style driver) + MSVC STL (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Visual Studio 17 2022 | MSBuild (the commands do nothing) |
 | MinGW-w64 GCC 16.1 + libstdc++ (Windows) | Ninja | this module |
@@ -19,7 +20,7 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 
 MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja with CMake 4.5.0 (see Results).
 
-Not supported: clang-cl, libc++, multi-config generators with GCC/Clang/MSVC-Ninja.
+Not supported: clang-cl, multi-config generators with GCC/Clang/MSVC-Ninja.
 
 ## Quick start
 
@@ -359,10 +360,10 @@ tests/t01..t21/                  test projects; tests/run_suite.cmake is the dri
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
-run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
+run-linux.sh, run-win.bat        run the suite (Linux: GCC, Clang + libstdc++, Clang + libc++; Windows: clang++ + MSVC STL)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
 run-msvc-ninja.bat               run the suite with MSVC and Ninja
-docker/                          the Linux toolchain image used for development (GCC 16, Clang 22, fmt, json, Boost)
+docker/                          the Linux toolchain image used for development (GCC 16, Clang 22 with libc++, fmt, json, Boost)
 docs/REPORT.md                   research report (in Chinese): CMake's position, compiler behaviour, prior art
 ```
 
@@ -415,8 +416,10 @@ For each test, `tests/run_suite.cmake` runs:
 
 How to run:
 
-* Linux: `sh run-linux.sh` runs GCC and Clang in parallel. Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS`,
-  `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on `/mnt/c`.
+* Linux: `sh run-linux.sh` runs GCC, Clang with libstdc++ and Clang with libc++ in parallel (`TC=gcc`, `clang` and
+  `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` (Clang with
+  libc++), `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on `/mnt/c`. With libc++, the tests
+  use fmt header-only, because the image's fmt library is compiled against libstdc++.
 * Windows, clang++ + MSVC STL: `run-win.bat`. It needs clang++, ninja and cmake on PATH, and finds Visual Studio via
   vswhere. It also needs the fmt 10.1.1 and nlohmann_json 3.11.3 sources:
 

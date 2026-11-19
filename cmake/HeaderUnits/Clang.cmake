@@ -1,4 +1,4 @@
-# HeaderUnits/Clang.cmake -- the Clang strategy (clang++ with the GNU-style driver; libstdc++ or the MSVC STL).
+# HeaderUnits/Clang.cmake -- the Clang strategy (clang++ with the GNU-style driver; libstdc++, libc++ or the MSVC STL).
 #
 # * Lazy, named header units (Buck2-style): a module map declares the real header as the only header of module
 #   <name>; the BMI (PCM) is the set's object file, built with -fmodule-name=<name> (without seeing the module map).

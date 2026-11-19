@@ -13,7 +13,7 @@
 #   set(HU_ALLOW_HEADER_IMPORTS ON)   # experimental: header units whose headers import header units
 #
 # Toolchains:
-#   GCC 16 (libstdc++), Clang 22 (GNU-style driver; libstdc++ or the MSVC STL) and MSVC 19.40+ with the Ninja
+#   GCC 16 (libstdc++), Clang 22 (GNU-style driver; libstdc++, libc++ or the MSVC STL) and MSVC 19.40+ with the Ninja
 #   generator: the module builds the header units (HeaderUnits/GCC.cmake, Clang.cmake, MSVCNinja.cmake).
 #   MSVC with a Visual Studio generator: MSBuild builds them; the commands do nothing (HeaderUnits/MSVC.cmake).
 #

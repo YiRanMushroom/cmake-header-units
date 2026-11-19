@@ -1,7 +1,7 @@
 # Test driver for the HeaderUnits prototype (portable: runs on Linux and Windows).
 #
-#   cmake -DTC=gcc|clang|win|mingw|msvc -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03] [-DFRESH=ON]
-#         -P tests/run_suite.cmake
+#   cmake -DTC=gcc|clang|libcxx|win|mingw|msvc -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03]
+#         [-DFRESH=ON] -P tests/run_suite.cmake
 #
 # For every test: fresh configure + build (-j, Ninja default), ctest, no-op rebuild, build.ninja edge check
 # (scan AND compile of every header-unit consumer depend on its BMIs), depfile evidence (imported headers
@@ -35,6 +35,16 @@ elseif(TC STREQUAL "clang")
   endif()
   set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX} "-DCMAKE_CXX_FLAGS=${CLANG_FLAGS}")
   set(OBJ .o)
+elseif(TC STREQUAL "libcxx")
+  # Clang with libc++ (Linux)
+  if(NOT DEFINED CLANG_CXX)
+    set(CLANG_CXX clang++-22)
+  endif()
+  if(NOT DEFINED LIBCXX_FLAGS)
+    set(LIBCXX_FLAGS -stdlib=libc++)               # libc++ 22 in docker/Dockerfile
+  endif()
+  set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX} "-DCMAKE_CXX_FLAGS=${LIBCXX_FLAGS}")
+  set(OBJ .o)
 elseif(TC STREQUAL "win")
   # CLANG_CXX: a clang++ other than the first on PATH (vcvars64.bat puts Visual Studio's own, older Clang first).
   if(NOT DEFINED CLANG_CXX OR CLANG_CXX STREQUAL "")
@@ -54,7 +64,7 @@ elseif(TC STREQUAL "msvc")
   set(TC_ARGS -DCMAKE_CXX_COMPILER=cl)
   set(OBJ .obj)
 else()
-  message(FATAL_ERROR "TC must be gcc, clang, win, mingw or msvc")
+  message(FATAL_ERROR "TC must be gcc, clang, libcxx, win, mingw or msvc")
 endif()
 if(CMAKE_HOST_WIN32)
   set(EXE .exe)
