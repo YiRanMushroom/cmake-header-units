@@ -36,7 +36,11 @@ elseif(TC STREQUAL "clang")
   set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX} "-DCMAKE_CXX_FLAGS=${CLANG_FLAGS}")
   set(OBJ .o)
 elseif(TC STREQUAL "win")
-  set(TC_ARGS -DCMAKE_CXX_COMPILER=clang++)
+  # CLANG_CXX: a clang++ other than the first on PATH (vcvars64.bat puts Visual Studio's own, older Clang first).
+  if(NOT DEFINED CLANG_CXX OR CLANG_CXX STREQUAL "")
+    set(CLANG_CXX clang++)
+  endif()
+  set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX})
   set(OBJ .obj)
 elseif(TC STREQUAL "mingw")
   # GCC on Windows (MinGW-w64); its bin directory must be on PATH for the test executables' runtime DLLs

@@ -3,6 +3,8 @@ rem Runs the test suite on Windows with clang++ (GNU-style driver, x86_64-pc-win
 rem   run-win.bat                        uses the first cmake.exe on PATH
 rem   set CMAKE_EXE=C:\path\cmake.exe    choose another CMake (>= 4.2; tested 4.4.5 and 4.5.0)
 rem   set TESTS=t01;t07                  run a subset
+rem   set CLANG_CXX=C:\llvm\bin\clang++.exe   a clang++ other than the first on PATH (vcvars64.bat puts Visual
+rem                                      Studio's own, older Clang before it)
 rem Needs clang++ and ninja on PATH, the MSVC environment (a VS Developer prompt, or vcvars64.bat is
 rem located via vswhere), and fmt 10.1.1 + nlohmann_json 3.11.3 sources in ext-src\ (see README).
 setlocal
@@ -19,7 +21,7 @@ if not defined VSDIR (echo run-win.bat: Visual Studio not found; open a VS Devel
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 :haveenv
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"
-"%CMAKE_EXE%" -DTC=win "-DCMAKE_EXE=%CMAKE_EXE%" -DTAG=local "-DTESTS=%TESTS%" -P "%HERE%tests\run_suite.cmake"
+"%CMAKE_EXE%" -DTC=win "-DCMAKE_EXE=%CMAKE_EXE%" -DTAG=local "-DTESTS=%TESTS%" "-DCLANG_CXX=%CLANG_CXX%" -P "%HERE%tests\run_suite.cmake"
 echo.
 echo toolchain^|cmake^|test^|verdict^|time^|evidence
 type "%HERE%_build\win-local\results.txt"
