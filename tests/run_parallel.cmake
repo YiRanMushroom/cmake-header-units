@@ -1,6 +1,6 @@
 # Runs the tests of tests/run_suite.cmake in parallel: each test is a CTest test that runs run_suite.cmake for that
 # test alone, and ctest -j runs them.  The same options as run_suite.cmake, plus JOBS: tests at a time (default: a
-# quarter of the logical cores, at least 2; each test's own ninja runs in parallel too).
+# quarter of the logical cores, at least 2; each test's own ninja runs in parallel too, NINJA_JOBS jobs if set).
 #   cmake -DTC=<toolchain> -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03] [-DJOBS=<n>] [...]
 #         -P tests/run_parallel.cmake
 # Writes _build/<TC>-<TAG>/results.txt, in test order, as run_suite.cmake does (per test: par/<test>.txt).
@@ -45,7 +45,7 @@ if(NOT JOBS)
 endif()
 
 set(pass)
-foreach(v CLANG_CXX CLANG_FLAGS LIBCXX_FLAGS LIBCXX_MODULES_JSON MINGW_CXX FRESH EXTRA_ARGS)
+foreach(v CLANG_CXX CLANG_FLAGS LIBCXX_FLAGS LIBCXX_MODULES_JSON MINGW_CXX FRESH EXTRA_ARGS NINJA_JOBS)
   if(DEFINED ${v})
     list(APPEND pass "-D${v}=${${v}}")
   endif()

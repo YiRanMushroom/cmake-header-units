@@ -496,7 +496,8 @@ For each test, `tests/run_suite.cmake` runs:
 How to run:
 
 * Every runner script uses `tests/run_parallel.cmake`: each test is a CTest test that runs `run_suite.cmake` for that
-  test alone, `ctest -j` runs them (`JOBS=<n>` tests at a time, default a quarter of the logical cores), and the
+  test alone, `ctest -j` runs them (`JOBS=<n>` tests at a time, default a quarter of the logical cores; `NINJA_JOBS=<n>`,
+  also as an environment variable, limits each test's own ninja, which otherwise uses every core), and the
   results are collected into the same `results.txt`. `run_suite.cmake` alone runs the tests one after another.
 * Linux: `sh run-linux.sh` runs GCC, Clang with libstdc++ and Clang with libc++ in parallel (`TC=gcc`, `clang` and
   `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` and

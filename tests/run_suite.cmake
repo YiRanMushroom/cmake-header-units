@@ -28,6 +28,14 @@ file(REMOVE "${RESULTS}")   # never report a previous run's table if this one ab
 get_filename_component(_cmdir "${CMAKE_EXE}" DIRECTORY)
 find_program(CTEST_EXE NAMES ctest ctest.exe HINTS "${_cmdir}" NO_DEFAULT_PATH REQUIRED)
 set(NINJA ninja)
+# NINJA_JOBS (-D or environment): jobs of each test's ninja (default: ninja's, all cores), to keep several suites or
+# tests at a time from exhausting a machine's memory
+if(NOT DEFINED NINJA_JOBS AND DEFINED ENV{NINJA_JOBS})
+  set(NINJA_JOBS "$ENV{NINJA_JOBS}")
+endif()
+if(NINJA_JOBS)
+  list(APPEND NINJA -j ${NINJA_JOBS})
+endif()
 if(TC STREQUAL "gcc")
   set(TC_ARGS -DCMAKE_CXX_COMPILER=g++)
   set(OBJ .o)
