@@ -163,7 +163,14 @@ variant(a01_n250   SRC a01_cmdline ARGS -DA01_N=250 RUN a01=0)
 variant(a01_stl    SRC a01_cmdline ARGS -DA01_STL=ON RUN a01=0)
 variant(a02_crossdir SRC a02_crossdir RUN app/a02_plain=41 app/a02_synth=41 app/a02_hu=41 STEP step_a02)
 variant(a03_shared_src SRC a03_shared_src RUN d1/a03_d1=0 d2/a03_d2=0)
-variant(a04_runtime SRC a04_runtime RUN a04_ok=0 a04_rt=0/ERR a04_idl=0/ERR a04_gdbg=0/ERR)
+variant(a04_ok   SRC a04_runtime ARGS -DA04_ONLY=none RUN a04_ok=0)
+variant(a04_rt   SRC a04_runtime ARGS -DA04_ONLY=a04_rt RUN a04_ok=0 a04_rt=0/ERR
+        EXPECT_win "CFG:target 'a04_rt' is incompatible with header-unit set 'hu_vec'.*ABI-affecting definitions differ")
+variant(a04_idl  SRC a04_runtime ARGS -DA04_ONLY=a04_idl RUN a04_ok=0 a04_idl=0/ERR
+        EXPECT_win "CFG:target 'a04_idl' is incompatible with header-unit set 'hu_vec'.*ABI-affecting definitions differ")
+variant(a04_gdbg SRC a04_runtime ARGS -DA04_ONLY=a04_gdbg RUN a04_ok=0 a04_gdbg=0/ERR
+        EXPECT_gcc "CFG:target 'a04_gdbg' is incompatible with header-unit set 'hu_vec'.*ABI-affecting definitions differ"
+        EXPECT_clang "CFG:target 'a04_gdbg' is incompatible with header-unit set 'hu_vec'.*ABI-affecting definitions differ")
 variant(a05_features SRC a05_compat ARGS -DA05_MODE=features RUN a05=0)
 variant(a05_extoff   SRC a05_compat ARGS -DA05_MODE=extoff   RUN a05=0)
 variant(a06_longpath SRC a06_longpath RUN a06=0)

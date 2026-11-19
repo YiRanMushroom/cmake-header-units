@@ -46,6 +46,19 @@ The a09 steps were chosen by the porter (no original driver): re-run cmake, dele
 After re-running cmake, the first ninja re-collates the dyndep files, because CMake rewrites CXXDependInfo.json. The driver accepts that as long as nothing is recompiled.
 Control run without the module (a plain C++20 project, CMake 4.5.0 in hu-dev): after re-running cmake, `ninja -n -d explain` shows the same `CXX.dd older than most recent input .../CXXDependInfo.json` (g++: `@cmake_cxx_std@synth_0`, clang: `c.dir`). This is CMake behaviour.
 
+## Update 2026-11-19: configure-time ABI check
+
+The consumer/set check now compares definitions that change the C++ library's ABI (`_GLIBCXX_DEBUG`, ...; with the MSVC
+STL `_ITERATOR_DEBUG_LEVEL`, ... and `MSVC_RUNTIME_LIBRARY`). A mismatch fails the whole configure, so a04 is split
+into one variant per mismatched target (`A04_ONLY`), each with the control a04_ok:
+
+| scenario | gcc (CMake 4.4.5) | clang (4.4.5) | win clang++ 22.1.8 (4.5.0) |
+|---|---|---|---|
+| a04_ok | PASS | PASS | PASS |
+| a04_rt | PASS (no effect) | PASS (no effect) | EXPECTED-ERROR at configure (was: link-time /failifmismatch) |
+| a04_idl | PASS (no effect) | PASS (no effect) | EXPECTED-ERROR at configure (was: link-time /failifmismatch) |
+| a04_gdbg | EXPECTED-ERROR at configure (was FAIL: silent layout mismatch, exit 3) | same as gcc | PASS (no effect) |
+
 ## Update 2026-11-17: after the fixes (CMake 4.5.0, fresh build dirs)
 
 All six confirmed module bugs below are fixed; every scenario now behaves as expected:
