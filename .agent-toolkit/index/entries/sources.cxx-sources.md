@@ -29,6 +29,6 @@ Probed with CMake 4.5.0:
 - CMake rejects a CXX_MODULES file-set entry that is not CXX ("not classified as a \"CXX\" source") or is HEADER_FILE_ONLY ("not scheduled for compilation").
 - File-set FILES may be generator expressions.
 
-Explicit names (target_header_units_scan_sources, target_import_header_units SOURCES) are resolved at the call with _hu_source_path in the calling directory. So a generated source given by name keeps the "does not exist at configure time" message. t28 covers all of this, and fails on every case with the code before.
+Explicit names (target_header_units_scan_sources, target_import_header_units SOURCES) are resolved at the call with _hu_source_path in the calling directory. So a generated source given by name keeps the "does not exist at configure time" message (probed with a custom-command output), and target_import_header_units SOURCES accepts it (t28i; before, it was "not a C++ source"). A name that exists nowhere, e.g. a typo, is reported with its build-directory path. t28 covers all of this, and fails on every case with the code before.
 
 Not handled: INTERFACE_SOURCES of linked libraries are compiled into the consumer, but neither command sees them.

@@ -13,8 +13,10 @@ include(HeaderUnits)
 #   gx.cpp (a source of the Debug configuration) and $<TARGET_OBJECTS:t28_obj>: generator expressions, evaluated at
 #             generate time; the module does not see them (gx.cpp's #include stays textual).
 # t28s: target_header_units_scan_sources() of gen_s.cpp, a configure_file output listed by a relative path.
+# t28i: target_import_header_units(... SOURCES gen_i.cpp), the same kind of source.
 configure_file(gen.cpp.in gen.cpp COPYONLY)
 configure_file(gen_s.cpp.in gen_s.cpp COPYONLY)
+configure_file(gen_i.cpp.in gen_i.cpp COPYONLY)
 add_library(t28_obj OBJECT obj.cpp)
 
 add_executable(t28 main.cpp gen.cpp lang.c hfo.cpp "$<$<CONFIG:Debug>:${CMAKE_CURRENT_SOURCE_DIR}/gx.cpp>"
@@ -29,6 +31,12 @@ add_executable(t28s s.cpp gen_s.cpp $<TARGET_OBJECTS:t28_obj>)
 target_include_directories(t28s PRIVATE inc)
 target_header_units_scan_sources(t28s gen_s.cpp)
 
+add_header_units(t28_imp HEADERS t28_imp.h INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/inc)
+add_executable(t28i i.cpp gen_i.cpp)
+target_include_directories(t28i PRIVATE inc)
+target_import_header_units(t28i t28_imp SOURCES gen_i.cpp)
+
 enable_testing()
 add_test(NAME t28 COMMAND t28)
 add_test(NAME t28s COMMAND t28s)
+add_test(NAME t28i COMMAND t28i)
