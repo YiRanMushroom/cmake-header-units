@@ -3,6 +3,7 @@ rem Runs the test suite on Windows with clang-cl (Clang's MSVC-style driver, MSV
 rem   run-clangcl.bat                    uses the first cmake.exe on PATH
 rem   set CMAKE_EXE=C:\path\cmake.exe    choose another CMake (>= 4.2)
 rem   set TESTS=t01;t07                  run a subset
+rem   set JOBS=8                         tests at a time (default: a quarter of the logical cores)
 rem   set CLANG_CXX=C:\llvm\bin\clang-cl.exe  a clang-cl other than the first on PATH (vcvars64.bat puts Visual
 rem                                      Studio's own, older Clang before it)
 rem Needs clang-cl and ninja on PATH, the MSVC environment (a VS Developer prompt, or vcvars64.bat is
@@ -21,7 +22,7 @@ if not defined VSDIR (echo run-clangcl.bat: Visual Studio not found; open a VS D
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
 :haveenv
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"
-"%CMAKE_EXE%" -DTC=clangcl "-DCMAKE_EXE=%CMAKE_EXE%" -DTAG=local "-DTESTS=%TESTS%" "-DCLANG_CXX=%CLANG_CXX%" -P "%HERE%tests\run_suite.cmake"
+"%CMAKE_EXE%" -DTC=clangcl "-DCMAKE_EXE=%CMAKE_EXE%" -DTAG=local "-DTESTS=%TESTS%" "-DJOBS=%JOBS%" "-DCLANG_CXX=%CLANG_CXX%" -P "%HERE%tests\run_parallel.cmake"
 echo.
 echo toolchain^|cmake^|test^|verdict^|time^|evidence
 type "%HERE%_build\clangcl-local\results.txt"

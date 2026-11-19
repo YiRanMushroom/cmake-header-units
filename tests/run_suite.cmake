@@ -1,7 +1,8 @@
 # Test driver for the HeaderUnits prototype (portable: runs on Linux and Windows).
 #
 #   cmake -DTC=gcc|clang|libcxx|win|clangcl|mingw|msvc -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03]
-#         [-DFRESH=ON] [-DEXTRA_ARGS=<configure arguments>] -P tests/run_suite.cmake
+#         [-DFRESH=ON] [-DEXTRA_ARGS=<configure arguments>] [-DRESULTS=<file>] -P tests/run_suite.cmake
+#   (tests/run_parallel.cmake runs the tests in parallel, with the same options)
 #
 # For every test: fresh configure + build (-j, Ninja default), ctest, no-op rebuild, build.ninja edge check
 # (scan AND compile of every header-unit consumer depend on its BMIs), depfile evidence (imported headers
@@ -19,7 +20,11 @@ if(NOT DEFINED FRESH)
   set(FRESH ON)
 endif()
 file(MAKE_DIRECTORY "${ROOT}/logs")
-file(REMOVE "${ROOT}/results.txt")   # never report a previous run's table if this one aborts
+# RESULTS: where the table goes (tests/run_parallel.cmake gives each test its own file)
+if(NOT DEFINED RESULTS)
+  set(RESULTS "${ROOT}/results.txt")
+endif()
+file(REMOVE "${RESULTS}")   # never report a previous run's table if this one aborts
 get_filename_component(_cmdir "${CMAKE_EXE}" DIRECTORY)
 find_program(CTEST_EXE NAMES ctest ctest.exe HINTS "${_cmdir}" NO_DEFAULT_PATH REQUIRED)
 set(NINJA ninja)
@@ -1384,4 +1389,4 @@ foreach(t IN LISTS TESTS)
   message("${verdict}  ${TC}  cmake-${CMAKE_VER}  ${name}  (${dt}s)  ${e}")
   string(APPEND results "${TC}|${CMAKE_VER}|${name}|${verdict}|${dt}s|${e}\n")
 endforeach()
-file(WRITE "${ROOT}/results.txt" "${results}")
+file(WRITE "${RESULTS}" "${results}")

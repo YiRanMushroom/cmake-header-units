@@ -401,7 +401,8 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t21/                  test projects; tests/run_suite.cmake is the driver
+tests/t01..t23/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+                                 tests in parallel (CTest)
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
@@ -464,6 +465,9 @@ For each test, `tests/run_suite.cmake` runs:
 
 How to run:
 
+* Every runner script uses `tests/run_parallel.cmake`: each test is a CTest test that runs `run_suite.cmake` for that
+  test alone, `ctest -j` runs them (`JOBS=<n>` tests at a time, default a quarter of the logical cores), and the
+  results are collected into the same `results.txt`. `run_suite.cmake` alone runs the tests one after another.
 * Linux: `sh run-linux.sh` runs GCC, Clang with libstdc++ and Clang with libc++ in parallel (`TC=gcc`, `clang` and
   `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` and
   `LIBCXX_MODULES_JSON` (Clang with libc++), `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on
@@ -484,7 +488,7 @@ How to run:
   executables' runtime DLLs), ninja and cmake on PATH:
 
   ```
-  cmake -DTC=mingw -DMINGW_CXX=C:/mingw64/bin/g++.exe -DCMAKE_EXE=<cmake under test> -DTAG=local -P tests/run_suite.cmake
+  cmake -DTC=mingw -DMINGW_CXX=C:/mingw64/bin/g++.exe -DCMAKE_EXE=<cmake under test> -DTAG=local -P tests/run_parallel.cmake
   ```
 
   `MINGW_CXX` defaults to `g++`; the results land in `_build/mingw-local/results.txt`.
