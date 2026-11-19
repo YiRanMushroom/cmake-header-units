@@ -43,7 +43,17 @@ elseif(TC STREQUAL "libcxx")
   if(NOT DEFINED LIBCXX_FLAGS)
     set(LIBCXX_FLAGS -stdlib=libc++)               # libc++ 22 in docker/Dockerfile
   endif()
+  # CMake 4.5 sets up `import std` for every C++20 target, from the modules file of the C++ library that the compiler
+  # names. In docker/Dockerfile that is /usr/lib/x86_64-linux-gnu/libc++.modules.json, whose relative paths resolve
+  # only from /usr/lib/llvm-22/lib (where a symbolic link to it is), so the configure fails ("Cannot find source
+  # file: /lib/share/libc++/v1/std.compat.cppm") unless CMAKE_CXX_STDLIB_MODULES_JSON names the link. Empty: not set.
+  if(NOT DEFINED LIBCXX_MODULES_JSON)
+    set(LIBCXX_MODULES_JSON /usr/lib/llvm-22/lib/libc++.modules.json)
+  endif()
   set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX} "-DCMAKE_CXX_FLAGS=${LIBCXX_FLAGS}")
+  if(LIBCXX_MODULES_JSON)
+    list(APPEND TC_ARGS "-DCMAKE_CXX_STDLIB_MODULES_JSON=${LIBCXX_MODULES_JSON}")
+  endif()
   set(OBJ .o)
 elseif(TC STREQUAL "win")
   # CLANG_CXX: a clang++ other than the first on PATH (vcvars64.bat puts Visual Studio's own, older Clang first).

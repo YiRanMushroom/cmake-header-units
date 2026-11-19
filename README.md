@@ -417,9 +417,14 @@ For each test, `tests/run_suite.cmake` runs:
 How to run:
 
 * Linux: `sh run-linux.sh` runs GCC, Clang with libstdc++ and Clang with libc++ in parallel (`TC=gcc`, `clang` and
-  `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` (Clang with
-  libc++), `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on `/mnt/c`. With libc++, the tests
-  use fmt header-only, because the image's fmt library is compiled against libstdc++.
+  `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` and
+  `LIBCXX_MODULES_JSON` (Clang with libc++), `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on
+  `/mnt/c`. With libc++:
+  * the tests use fmt header-only, because the image's fmt library is compiled against libstdc++;
+  * the driver sets `CMAKE_CXX_STDLIB_MODULES_JSON` to `LIBCXX_MODULES_JSON` (default
+    `/usr/lib/llvm-22/lib/libc++.modules.json`). CMake 4.5 sets up `import std` for every C++20 target, from the
+    modules file that Clang names; in the image, that file's relative source paths resolve only from
+    `/usr/lib/llvm-22/lib`, so without the setting every configure fails.
 * Windows, clang++ + MSVC STL: `run-win.bat`. It needs clang++, ninja and cmake on PATH, and finds Visual Studio via
   vswhere. It also needs the fmt 10.1.1 and nlohmann_json 3.11.3 sources:
 
@@ -446,6 +451,18 @@ How to run:
   `tests/attack/RESULTS.md`.
 
 ## Results
+
+**2026-11-19, Linux, CMake 4.4.5 and 4.5.0** (the image of `docker/`, fresh build directories, `run-linux.sh`): t01-t21
+**63/63 PASS** with each CMake version, on GCC 16.2, Clang 22 + libstdc++ 16 and Clang 22 + libc++ 22 (`TC=libcxx`,
+new). The module needed no change for libc++. Before the tests used fmt header-only with libc++, the three tests that
+use fmt (t02, t08, t11) failed to link; with CMake 4.5.0 and without `CMAKE_CXX_STDLIB_MODULES_JSON`, every libc++
+configure failed (see How to run).
+
+`import std` with CMake 4.5.0 on Linux: a target that imports `std` and a header unit whose header includes `<string>`
+builds and runs with GCC 16.2, Clang 22 + libstdc++ and Clang 22 + libc++, as does the same target without header
+units. With Clang in the image, CMake finds the C++ library's modules file only when `CMAKE_CXX_STDLIB_MODULES_JSON`
+names it, with or without this module: for libstdc++ CMake asks `clang++ -print-file-name=libstdc++.modules.json`
+without `CMAKE_CXX_FLAGS`, so `--gcc-toolchain` does not apply and Clang names no file; for libc++ see How to run.
 
 **2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
 10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way
