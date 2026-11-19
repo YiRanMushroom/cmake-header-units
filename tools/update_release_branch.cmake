@@ -46,6 +46,7 @@ file(REMOVE "${idx}")
 
 string(SUBSTRING "${sha}" 0 12 short)
 hu_git(prev MAYFAIL rev-parse --verify -q refs/heads/release)
+set(expect "${prev}")         # update-ref's check: the local branch is still what we read (none: it must not exist)
 if(NOT prev)
   # A clone has only origin/release until a local branch is made: continue that history (a commit without a parent
   # would not push onto it).
@@ -61,5 +62,9 @@ if(prev)
   set(parent -p ${prev})
 endif()
 hu_git(commit commit-tree ${tree} ${parent} -m "Release from main ${short}: ${subject}")
-hu_git(_ update-ref refs/heads/release ${commit} ${prev})
+if(NOT expect)
+  string(LENGTH "${commit}" n)
+  string(REPEAT "0" ${n} expect)     # the null object id: "refs/heads/release must not exist yet"
+endif()
+hu_git(_ update-ref refs/heads/release ${commit} ${expect})
 message(STATUS "release -> ${commit} (files of ${short}); publish it with: git push origin release")
