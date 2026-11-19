@@ -1,13 +1,22 @@
 +++
-title = "GCC header units are compiled from a generated wrapper (#include of the header), so a self-including header works"
+title = "GCC header unit's own compile: hu-mapper keeps a self-#include textual (wrappers as the fallback)"
 kind = "design"
-keys = [ "build tree header", "dependency cycle", "depends on itself", "fmt format.h", "self-include", "wrapper" ]
-updated = "2026-11-18 23:50:59"
-checked = "2026-11-18"
+keys = [ "build tree header", "cross-compiling", "dependency cycle", "depends on itself", "fmt format.h", "hu-mapper", "hu_gcc_wrappers", "hu_host_cxx", "libcody", "mapper protocol", "self-include", "wrapper" ]
+updated = "2026-11-19 00:22:30"
+checked = "2026-11-19"
+
+[[links]]
+path = "cmake/HeaderUnits/hu-mapper.cpp"
+snippet = "int main(int argc, char** argv) {"
+
+[[links]]
+path = "cmake/HeaderUnits/GCC.cmake"
+snippet = "function(_hu_gcc_self_lines out p name cmi)"
 
 [[links]]
 path = "cmake/HeaderUnits/GCC.cmake"
 snippet = "function(_hu_gcc_wrapper src_out keys_out hudir p)"
 +++
-GCC's file mapper translates every #include of a listed path into an import, and exporting and importing use the same key, so a header unit's own mapper could not list the header without GCC also importing it when the header includes itself through another one (fmt's core.h includes "format.h" when header-only; t21_self_include). Then: GCC notes "import ... failed, falling back to include" and its depfile names the CMI as its own input (Ninja: dependency cycle); with the CMI spelled absolute instead, the next build after a change fails with "module ... depends on itself" (the old CMI exists). Linux GCC behaves the same (t21), MinGW only showed it first (t08 with header-only fmt).
-Fix: CMake compiles hudir/gcc/w/<md5-16>/<name> containing only #include "<p>"; the header unit's own map lists the wrapper's spellings (abs, real, relative to the build dir as CMake passes build-tree sources, ./relative), not p; consumers' maps keep p's keys. GCC does not check a header unit's name when reading the CMI ("header units can be aliased", module.cc read_config). Side effects: headers in the build tree need no launcher any more (gcc-abs-src.sh removed; t12 passes on MinGW); #pragma GCC system_header in the header now applies. Core records the compiled source per header (_HU_SET_<s>_SRCS; Clang: p after its macro made p the real path).
+GCC's file mapper answers MODULE-EXPORT and INCLUDE-TRANSLATE from the same entry, so a header unit's own mapper listing the header made GCC import the header unit being built when the header includes itself through another one (fmt's core.h includes "format.h" when header-only; t21_self_include): the depfile names the CMI as its own input (Ninja cycle), and once the CMI exists the build fails with "depends on itself". Linux GCC behaves the same.
+Now (user's choice over the wrapper): hu-mapper.cpp, a small libcody server (protocol: gcc/libcody/README.md; INCLUDE-TRANSLATE may answer "BOOL TRUE" = textual), built at configure time once per build tree with the project's compiler (-static-libstdc++ -static-libgcc, -static on Windows hosts; rebuilt if the source is newer). Header compile: -fmodule-mapper=|hu-mapper <map>; map: $root, $export <cmi> (answered whatever name GCC exports under, so build-tree headers need no launcher), $textual <each spelling of the header> (_hu_gcc_self_lines), plus "<path> <cmi>" for HU_ALLOW_HEADER_IMPORTS deps. Consumers keep GCC's g++-mapper-server (named modules untouched).
+Cross-compiling: built with HU_HOST_CXX or c++/g++/clang++ found on the host (find_program NO_CMAKE_FIND_ROOT_PATH; its variable must be unset first or it does not search) and kept only if it runs. Else, or with HU_GCC_WRAPPERS ON: compile a wrapper (only #include "<p>") whose own map lists only the wrapper; GCC does not check a header unit's name on reading the CMI. Debug info identical (checked with DWARF decl_file/decl_line).

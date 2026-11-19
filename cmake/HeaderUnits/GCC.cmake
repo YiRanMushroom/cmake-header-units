@@ -1,8 +1,9 @@
 # HeaderUnits/GCC.cmake -- the GCC strategy (included by HeaderUnits.cmake when the C++ compiler is GCC).
 #
 # * A header unit is identified by the resolved path of its header.  Its BMI (CMI) is built with -fmodule-only as
-#   the set's object file, from a generated wrapper that #includes the header, through a per-header mapper that lists
-#   only that wrapper (CMIs independent of build order; see _hu_gcc_wrapper).
+#   the set's object file, through hu-mapper (hu-mapper.cpp, built at configure time): it gives GCC the CMI to write and
+#   keeps every #include in the header textual, also one of the header itself (CMIs independent of build order).
+#   Cross-compiling (or HU_GCC_WRAPPERS ON), the header is compiled from a wrapper instead (_hu_gcc_wrapper).
 # * A consumer source gets a per-source mapper (g++-mapper-server) that lists its header units; GCC then also
 #   translates an #include of a listed header into an import.
 # * CMake's internal CMAKE_CXX_MODULE_MAP_FLAG is overridden so that the compile serves CMake's named-module map and
@@ -24,6 +25,69 @@ if(NOT IS_ABSOLUTE "${_hu_srv}" OR NOT EXISTS "${_hu_srv}")
   message(FATAL_ERROR "HeaderUnits: '${CMAKE_CXX_COMPILER} -print-prog-name=g++-mapper-server' gave '${_hu_srv}', not an existing file.")
 endif()
 set_property(GLOBAL PROPERTY _HU_GCC_SERVER "${_hu_srv}")
+# hu-mapper, the mapper of a header unit's own compile: built once per build tree.  Natively with this compiler;
+# cross-compiling with a host compiler (HU_HOST_CXX, else c++ / g++ / clang++ on the host's PATH), kept only if the
+# result runs here.  With HU_GCC_WRAPPERS ON, or without a working host program, header units are compiled from
+# wrappers (_hu_gcc_wrapper), which needs no program.
+set(_hu_mapper "")
+if(NOT HU_GCC_WRAPPERS)
+  set(_hu_msrc "${CMAKE_CURRENT_LIST_DIR}/hu-mapper.cpp")
+  set(_hu_mexe "${_HU_DIR}/hu-mapper")
+  if(CMAKE_HOST_WIN32)
+    string(APPEND _hu_mexe ".exe")
+  endif()
+  set(_hu_mcxx "")
+  set(_hu_a1)
+  if(NOT CMAKE_CROSSCOMPILING)
+    set(_hu_mcxx "${CMAKE_CXX_COMPILER}")
+    if(CMAKE_CXX_COMPILER_ARG1)
+      separate_arguments(_hu_a1 NATIVE_COMMAND "${CMAKE_CXX_COMPILER_ARG1}")
+    endif()
+  elseif(HU_HOST_CXX)
+    set(_hu_mcxx "${HU_HOST_CXX}")
+  else()
+    unset(_hu_found)                     # (find_program does not search when its variable is already set)
+    find_program(_hu_found NAMES c++ g++ clang++ NO_CACHE NO_CMAKE_FIND_ROOT_PATH)
+    if(_hu_found)
+      set(_hu_mcxx "${_hu_found}")
+    endif()
+  endif()
+  if(_hu_mcxx AND (NOT EXISTS "${_hu_mexe}" OR "${_hu_msrc}" IS_NEWER_THAN "${_hu_mexe}"))
+    set(_hu_mflags -std=c++17 -O1 -static-libstdc++ -static-libgcc)
+    if(CMAKE_HOST_WIN32)
+      list(APPEND _hu_mflags -static)    # no DLLs to find when GCC starts it (Ninja's PATH may lack the compiler's bin)
+    endif()
+    file(MAKE_DIRECTORY "${_HU_DIR}")
+    execute_process(COMMAND "${_hu_mcxx}" ${_hu_a1} ${_hu_mflags} -o "${_hu_mexe}" "${_hu_msrc}"
+                    RESULT_VARIABLE _hu_rc OUTPUT_VARIABLE _hu_out ERROR_VARIABLE _hu_out)
+    if(_hu_rc EQUAL 0 AND CMAKE_CROSSCOMPILING)
+      # it must run on this host: an empty map and no requests
+      file(WRITE "${_HU_DIR}/hu-mapper-check.map" "")
+      execute_process(COMMAND "${_hu_mexe}" "${_HU_DIR}/hu-mapper-check.map" INPUT_FILE "${_HU_DIR}/hu-mapper-check.map"
+                      RESULT_VARIABLE _hu_rc OUTPUT_VARIABLE _hu_o2 ERROR_VARIABLE _hu_o2)
+      string(APPEND _hu_out "${_hu_o2}")
+    endif()
+    if(_hu_rc EQUAL 0)
+      if(CMAKE_CROSSCOMPILING)
+        message(STATUS "HeaderUnits: built ${_hu_mexe} with the host compiler ${_hu_mcxx}")
+      else()
+        message(STATUS "HeaderUnits: built ${_hu_mexe}")
+      endif()
+    else()
+      file(REMOVE "${_hu_mexe}")
+      message(WARNING "HeaderUnits: could not build hu-mapper with ${_hu_mcxx} (${_hu_rc}); header units are compiled "
+        "from wrappers:\n${_hu_out}")
+    endif()
+  elseif(NOT _hu_mcxx)
+    message(STATUS "HeaderUnits: cross-compiling without a host C++ compiler (HU_HOST_CXX): header units are compiled "
+      "from wrappers")
+  endif()
+  if(_hu_mcxx AND EXISTS "${_hu_mexe}")
+    set(_hu_mapper "${_hu_mexe}")
+  endif()
+endif()
+set_property(GLOBAL PROPERTY _HU_GCC_MAPPER "${_hu_mapper}")
+unset(_hu_mapper)
 # Compile-time module mapper: CMake's per-TU .modmap (named modules) + this TU's header-unit map, if any.
 # $1 = CMake's <MODULE_MAP_FILE>, $2 = the TU's source path (Ninja's $in; relative = inside the build dir).
 if(CMAKE_HOST_WIN32)
@@ -134,7 +198,25 @@ function(_hu_gcc_keys out p name)
   set(${out} "${keys}" PARENT_SCOPE)
 endfunction()
 
-# The source GCC compiles for header <p>: a wrapper in the build tree whose only line is #include "<p>".  The header
+# hu-mapper's map lines for building the header unit of <p> (found as <name> in DIRS / RAW) into <cmi>: the CMI to
+# export, and every spelling GCC may use for an #include of the header itself (_hu_gcc_keys, plus the path relative to
+# the build directory, as CMake passes a source inside it), to be kept textual.
+function(_hu_gcc_self_lines out p name cmi)
+  cmake_parse_arguments(PARSE_ARGV 4 A "" "" "DIRS;RAW")
+  _hu_gcc_keys(keys "${p}" "${name}" DIRS ${A_DIRS} RAW ${A_RAW})
+  string(FIND "${p}" "${CMAKE_BINARY_DIR}/" inbin)
+  if(inbin EQUAL 0)
+    file(RELATIVE_PATH rp "${CMAKE_BINARY_DIR}" "${p}")
+    list(APPEND keys "${rp}" "./${rp}")
+  endif()
+  set(lines "$root .\n$export ${cmi}\n")
+  foreach(k IN LISTS keys)
+    string(APPEND lines "$textual ${k}\n")
+  endforeach()
+  set(${out} "${lines}" PARENT_SCOPE)
+endfunction()
+
+# Without hu-mapper: the source GCC compiles for header <p>: a wrapper in the build tree whose only line is #include "<p>".  The header
 # unit is exported under the wrapper's name (its keys: the spellings GCC may use for it, as CMake passes a source in the
 # build tree relative to it), and consumers' maps name the header itself: GCC does not check a header unit's name when
 # it reads the CMI ("header units can be aliased").  So a header that includes itself through another one (fmt's
@@ -192,14 +274,23 @@ macro(_hu_GCC_add_header)
     foreach(kk IN LISTS hkeys)
       string(APPEND keys "${kk} ${rcmi}\n")
     endforeach()
-    # The header unit is compiled from a wrapper, and its own mapper lists only the wrapper: GCC translates no #include
-    # inside it into an import (CMI content independent of build order), not even one of the header itself.
-    _hu_gcc_wrapper(hsrc wkeys "${hudir}" "${p}")
-    set(selfkeys "")
-    foreach(kk IN LISTS wkeys)
-      string(APPEND selfkeys "${kk} ${rcmi}\n")
-    endforeach()
-    file(CONFIGURE OUTPUT "${hmap}" CONTENT "$root .\n${selfkeys}" NEWLINE_STYLE UNIX)
+    # The header unit's own mapper makes GCC translate no #include inside it into an import (CMI content independent of
+    # build order), not even one of the header itself: hu-mapper answers the export with the CMI and an #include of the
+    # header (each spelling) with "textual"; without hu-mapper, the wrapper is compiled and only it is listed.
+    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(mapper)
+      set(hsrc "${p}")
+      _hu_gcc_self_lines(hlines "${p}" "${h}" "${rcmi}" DIRS ${S_DIRS} RAW ${S_RAW})
+      set(mopt "-fmodule-mapper=|${mapper} ${hmap}")
+    else()
+      _hu_gcc_wrapper(hsrc wkeys "${hudir}" "${p}")
+      set(hlines "$root .\n")
+      foreach(kk IN LISTS wkeys)
+        string(APPEND hlines "${kk} ${rcmi}\n")
+      endforeach()
+      set(mopt "-fmodule-mapper=${hmap}")
+    endif()
+    file(CONFIGURE OUTPUT "${hmap}" CONTENT "${hlines}" NEWLINE_STYLE UNIX)
     list(APPEND hmaps "${hmap}")
     string(APPEND maplines "${keys}")
     set_source_files_properties("${hsrc}" TARGET_DIRECTORY ${set} PROPERTIES
@@ -209,7 +300,7 @@ macro(_hu_GCC_add_header)
       # .PHONY) that Ninja records as never-existing inputs (always dirty).  Not -fdeps-format=p1689r5, which does the
       # same here but makes a compile without -M fail ("to generate dependencies you must specify either '-M' or
       # '-MM'"), as IDEs run these flags to read the compiler's settings (CLion).
-      COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;-fmodule-mapper=${hmap};-Mno-modules")
+      COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;${mopt};-Mno-modules")
     list(APPEND cmis "${cmi}")
 endmacro()
 
@@ -240,13 +331,18 @@ endmacro()
 # _hu_finalize(), HU_ALLOW_HEADER_IMPORTS: write header p's mapper: its wrapper (_hu_gcc_wrapper), then its imports.
 macro(_hu_GCC_header_import_done)
     list(GET hm ${i} hmap)
-    _hu_gcc_wrapper(wsrc wkeys "${hudir}" "${p}")
     file(RELATIVE_PATH rb0 "${CMAKE_BINARY_DIR}" "${b}")
-    set(selfl "")
-    foreach(kk IN LISTS wkeys)
-      string(APPEND selfl "${kk} ${rb0}\n")
-    endforeach()
-    file(CONFIGURE OUTPUT "${hmap}" CONTENT "$root .\n${selfl}${maplines}" NEWLINE_STYLE UNIX)
+    get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(mapper)
+      _hu_gcc_self_lines(selfl "${p}" "${h}" "${rb0}" DIRS ${sdirs} RAW ${sraws})
+    else()
+      _hu_gcc_wrapper(wsrc wkeys "${hudir}" "${p}")
+      set(selfl "$root .\n")
+      foreach(kk IN LISTS wkeys)
+        string(APPEND selfl "${kk} ${rb0}\n")
+      endforeach()
+    endif()
+    file(CONFIGURE OUTPUT "${hmap}" CONTENT "${selfl}${maplines}" NEWLINE_STYLE UNIX)
 endmacro()
 
 # _hu_finalize(), per consumer source: in: t, src, tsets, hudir; appends opts and deps.

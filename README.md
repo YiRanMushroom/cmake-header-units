@@ -238,18 +238,24 @@ defined before the include take effect. Use it for the one source of an stb-styl
   where that compile finds the header (an `-I` directory as given: GCC on Linux keeps `dir/../inc/x.h`; system
   directories, and everything on Windows, normalized), the normalized path and the real path (a symbolic link), all
   for the same BMI. So a consumer that spells an include directory differently from the set gets its own spelling.
-* Each BMI is built with `-fmodule-only` from a generated wrapper whose only line is `#include "<header>"`, through a
-  mapper that lists only that wrapper, so BMIs do not depend on build order. Consumers' maps name the header itself
-  (GCC does not check a header unit's name when it reads the BMI). So a header that includes itself through another
-  one (fmt's `core.h` includes `"format.h"` when header-only) stays a textual `#include` inside its own header unit;
-  listed in its own mapper, GCC would import the header unit being built (a Ninja dependency cycle, then "depends on
-  itself" once the BMI exists).
+* Each BMI is built with `-fmodule-only` through `hu-mapper`, a small mapper program (`cmake/HeaderUnits/hu-mapper.cpp`,
+  GCC's libcody protocol) that configure builds once per build tree with the project's compiler. It gives GCC the BMI
+  to write and keeps every `#include` in the header textual, so BMIs do not depend on build order. That includes an
+  `#include` of the header itself, through another one (fmt's `core.h` includes `"format.h"` when header-only):
+  GCC's own file mapper answers "where to write the BMI" and "is this `#include` a header unit" from the same entry,
+  so GCC imported the header unit it was building (a Ninja dependency cycle, then "depends on itself" once the BMI
+  existed); `hu-mapper` answers the latter with "textual" for the header being built.
+* Cross-compiling, `hu-mapper` is built by a host compiler (`HU_HOST_CXX`, else `c++`, `g++` or `clang++` on the host's
+  `PATH`) and kept if it runs. Without one (or with `HU_GCC_WRAPPERS` ON), each header unit is compiled from a
+  generated wrapper whose only line is `#include "<header>"`, and its own mapper lists only the wrapper: the same
+  effect without a program (GCC does not check a header unit's name when it reads the BMI, so consumers still name the
+  header). Debug information is the same either way (the wrapper only adds an include level, no code).
 * Each consumer source gets a mapper (`g++-mapper-server`) listing its header units. GCC also translates `#include`s of
   listed headers into imports.
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
   header-unit map together.
-* Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: CMake compiles
-  the wrapper, whose spellings are all in its mapper.
+* Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
+  answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
 * On Windows (MinGW-w64) there is no `/bin/sh`, so the consumer mapper is a generated `gcc-mapper.cmd` run through
   `cmd /c`; it finds the source's map in `src-index.txt`. Mapper files get short hashed names, because paths past 260
   characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
@@ -312,6 +318,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
 cmake/HeaderUnits.cmake          entry point: include(HeaderUnits)
 cmake/HeaderUnits/Core.cmake     add_header_units, target_import_header_units, finalization
 cmake/HeaderUnits/Common.cmake   header lookup, import scanning, usage requirements, compatibility check
+cmake/HeaderUnits/hu-mapper.cpp  GCC: the mapper of a header unit's own compile (built at configure time)
 cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
@@ -362,7 +369,7 @@ Each test is a standalone CMake project with a one-line README:
 | t18_spelling | an explicit set whose consumer, in a later directory, spells the include directory differently (`app/../inc`); both list a directory that does not exist first |
 | t19_scale | 5 and 40 targets, each with its own include directory and header: the number of compiler runs for the lookup is the same |
 | t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
-| t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build |
+| t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler) |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -399,13 +406,13 @@ How to run:
 
 ## Results
 
-**2026-11-18, after the lookup rework and GCC's wrapper sources** (fresh build directories): t01-t21 **63/63 PASS**
-on GCC 16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64
-GCC 16.1 (`TC=mingw`, CMake 4.5.0): 20 PASS, and t02_thirdparty fails the known way (XFAIL; link: multiple
-definitions in fmt). t08_auto (fmt's self-include) and t12_build_tree (a header in the build tree), which failed there
-before, pass since GCC compiles header units from wrappers. After the full suites, a fix for Clang with a header reached
-through a symbolic link was checked with t07, t10, t17 and t21 on Linux. t19_scale: 5 and 40 targets both take 2
-compiler runs at configure time (one lookup run plus the self-check).
+**2026-11-19, after the lookup rework and GCC's hu-mapper** (fresh build directories): t01-t21 **63/63 PASS** on GCC
+16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64 GCC 16.1
+(`TC=mingw`, CMake 4.5.0): 20 PASS, and t02_thirdparty fails the known way (XFAIL; link: multiple definitions in fmt).
+t08_auto (fmt's self-include) and t12_build_tree (a header in the build tree), which failed there before, pass. With
+GCC, t21_self_include also covers the wrapper fallback (`HU_GCC_WRAPPERS`) and a cross build (an explicit
+`CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler). t19_scale: 5 and 40 targets both take 2 compiler runs
+for the header lookup at configure time (one lookup run plus the self-check).
 
 Earlier the same day, the header lookup without `try_compile`: configure time of t02_thirdparty (3 sets) on Windows
 with MinGW went from 11.7 s to 1.9 s, of which 1.4 s is CMake's own compiler detection.
