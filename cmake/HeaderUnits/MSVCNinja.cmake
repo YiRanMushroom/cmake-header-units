@@ -3,7 +3,8 @@
 #
 # * A header unit is identified by the resolved path of its header.  Its IFC is built with /exportHeader /ifcOnly and
 #   written as the set's object file (/ifcOutput), so it is a real Ninja output, rebuilt when it is deleted (like GCC's
-#   -fmodule-only CMI).  The header's own #includes stay textual (no /translateInclude there).
+#   -fmodule-only CMI).  The header's own #includes stay textual (no /translateInclude there).  A header in two sets
+#   of one directory has one set of source properties, so they do not depend on the set (as in Clang.cmake).
 # * A consumer source gets /headerUnit "<path>=<ifc>" for each of its header units, and /translateInclude, in a
 #   response file (one per distinct content): an import of the header, or an #include of it, uses the IFC.  The
 #   dependency scan gets
@@ -43,9 +44,25 @@ set_property(GLOBAL PROPERTY _HU_MSVC_TOOLCHAIN_DEPS "${_HU_DIR}/msvc-toolchain.
 
 # add_header_units(), per header: in: set, h, p, oname, hudir; appends cmis.
 macro(_hu_MSVC_add_header)
-    # CMAKE-INTERNAL: object location, see Clang.cmake.  With /ifcOnly cl writes no object; the IFC takes its place.
+    # Source properties are per directory: a header in two sets of one directory gets ONE set of source properties,
+    # which the last set would otherwise overwrite (its OBJECT_NAME, and an /ifcOutput naming its own directory, so
+    # every set's compile writes that set's IFC).  A second set in the same directory reuses the first one's
+    # OBJECT_NAME (the header may be spelled differently there), keyed by the real path (two spellings of one file
+    # that CMake takes for two sources only share an object name, which is harmless).
+    file(REAL_PATH "${p}" rpo)
+    string(MD5 dk "${CMAKE_CURRENT_SOURCE_DIR}|${rpo}")
+    get_property(prev_oname GLOBAL PROPERTY _HU_MSVC_ONAME_${dk})
+    if(prev_oname)
+      set(oname "${prev_oname}")
+    else()
+      set_property(GLOBAL PROPERTY _HU_MSVC_ONAME_${dk} "${oname}")
+    endif()
+    # CMAKE-INTERNAL: object location, see Clang.cmake.  With /ifcOnly cl writes no object; the IFC takes its place:
+    # /ifcOutput names the object path, relative to the top build dir, with the set's directory spelled
+    # $<TARGET_PROPERTY:NAME> (the target that compiles it), as clang-cl's /clang:-o in Clang.cmake.
     set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
-    file(RELATIVE_PATH rcmi "${CMAKE_BINARY_DIR}" "${cmi}")
+    file(RELATIVE_PATH od "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
+    set(rcmi "${od}/$<TARGET_PROPERTY:NAME>.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
     get_property(tcdeps GLOBAL PROPERTY _HU_MSVC_TOOLCHAIN_DEPS)
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
