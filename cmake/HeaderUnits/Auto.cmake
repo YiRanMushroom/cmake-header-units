@@ -22,9 +22,10 @@ function(target_auto_header_units tgt)
 endfunction()
 
 # target_header_units_scan_sources(<target> <src>... [same options as target_auto_header_units])
-# The same, but only the listed sources (paths relative to the current source directory) are scanned, and only they
-# receive the header units; the target's other sources are left alone (their #includes stay textual).  Can be called
-# several times for one target: headers that already have a header unit are reused.
+# The same, but only the listed sources (a relative path: in the current source directory, else in the current build
+# directory) are scanned, and only they receive the header units; the target's other sources are left alone (their
+# #includes stay textual).  Can be called several times for one target: headers that already have a header unit are
+# reused.
 function(target_header_units_scan_sources tgt)
   _hu_auto_request(target_header_units_scan_sources ${tgt} ${ARGN})
 endfunction()

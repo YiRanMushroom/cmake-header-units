@@ -1800,7 +1800,7 @@ function(test_t28_cxx_sources bdir)
   bail_if_failed()
   hu_build_check(t28_cxx_sources "${bdir}")
   bail_if_failed()
-  evid("scanned and given header units: a module unit of the default CXX_MODULES file set, a build-directory source listed by a relative path (also by target_header_units_scan_sources), a .c file with LANGUAGE CXX; not scanned: a HEADER_FILE_ONLY source; skipped: generator-expression sources (a configuration's source, TARGET_OBJECTS)")
+  evid("scanned and given header units: a module unit of the default CXX_MODULES file set, a build-directory source listed by a relative path (also named in target_header_units_scan_sources and target_import_header_units SOURCES), a .c file with LANGUAGE CXX; not scanned: a HEADER_FILE_ONLY source; skipped: generator-expression sources (a configuration's source, TARGET_OBJECTS)")
 endfunction()
 
 # -------------------------------------------------------------------------------------------------- main
