@@ -188,7 +188,8 @@ std::string lookup(const std::string& index, const std::string& source) {
 // "pragma <s>" for each source with the textual-includes marker.  This computes exactly what Common.cmake's
 // _hu_scan_imports, _hu_import_name and _hu_find_header compute (the CMake fallback): keep the two in step.
 // A source's import lines and marker are kept in the cache file under its modification time and size, so a
-// reconfigure reads only the sources that changed.
+// reconfigure reads only the sources that changed.  A source that exists but cannot be read is not cached; the run
+// names it on stderr and exits with 3, without a result (the caller then scans with CMake).
 namespace fs = std::filesystem;
 
 bool is_ws(char c) { return c == ' ' || c == '\t'; }
@@ -291,17 +292,20 @@ std::string stamp_of(const std::string& p) {
 
 // The import lines and the marker of a file, from the pieces file(STRINGS) gives _hu_scan_imports and Core.cmake:
 // lines without "\r", also ended by a byte that is neither printable ASCII nor a tab -- except non-ASCII bytes in a
-// file that starts with a UTF-8 byte order mark (which is skipped; file(STRINGS) then reads UTF-8).
-Scanned scan_file(const std::string& path, const std::string& stamp) {
-  Scanned r;
+// file that starts with a UTF-8 byte order mark (which is skipped; file(STRINGS) then reads UTF-8).  False if the file
+// cannot be read (not opened, or a read error: on Windows e.g. while an editor saves it or a virus scanner holds it).
+bool scan_file(const std::string& path, const std::string& stamp, Scanned& r) {
+  r = Scanned();
   r.stamp = stamp;
   FILE* f = uopen(path, false);
-  if (!f) return r;
+  if (!f) return false;
   std::string data;
   char buf[65536];
   size_t got;
   while ((got = std::fread(buf, 1, sizeof buf, f)) > 0) data.append(buf, got);
+  bool bad = std::ferror(f) != 0;
   std::fclose(f);
+  if (bad) return false;
   size_t i = 0;
   bool utf8 = data.compare(0, 3, "\xEF\xBB\xBF") == 0;
   if (utf8) i = 3;
@@ -322,7 +326,7 @@ Scanned scan_file(const std::string& path, const std::string& stamp) {
     else end_piece();
   }
   end_piece();
-  return r;
+  return true;
 }
 
 // Cache file: "f <stamp>\t<marker 0|1>\t<path>", then "i <import>" lines of that file.
@@ -427,6 +431,7 @@ int scan(const std::string& request, const std::string& result) {
   if (!cache_file.empty()) read_cache(cache_file, cache);
   bool changed = false;
   std::string out;
+  std::set<std::string> unreadable;
   for (const Req& q : reqs) {
     out += "req " + q.id + "\n";
     std::vector<std::string> names;
@@ -438,7 +443,15 @@ int scan(const std::string& request, const std::string& result) {
       out += "file " + s + "\n";
       auto it = cache.find(s);
       if (it == cache.end() || it->second.stamp != st) {
-        cache[s] = scan_file(s, st);
+        Scanned sc;
+        if (!scan_file(s, st, sc)) {
+          // Not cached under its stamp (it would stay "no imports" until the file changes): reported below
+          if (it != cache.end()) cache.erase(it);
+          changed = true;
+          unreadable.insert(s);
+          continue;
+        }
+        cache[s] = sc;
         it = cache.find(s);
         changed = true;
       }
@@ -453,6 +466,10 @@ int scan(const std::string& request, const std::string& result) {
     out += pragmas;
   }
   if (changed && !cache_file.empty()) write_cache(cache_file, cache);
+  if (!unreadable.empty()) {   // no result: the caller scans with CMake, which reads the files again
+    for (const std::string& s : unreadable) std::fprintf(stderr, "hu-mapper: cannot read %s\n", s.c_str());
+    return 3;
+  }
   FILE* o = uopen(result, true);
   if (!o) {
     std::fprintf(stderr, "hu-mapper: cannot write %s\n", result.c_str());
