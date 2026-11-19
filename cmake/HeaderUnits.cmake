@@ -70,6 +70,13 @@ set_property(GLOBAL PROPERTY _HU_DIR "${_HU_DIR}")
 # Spelled with CMAKE_CURRENT_LIST_DIR (not a variable of our own) so that IDEs which follow include() (CLion's CMake
 # completion) find the commands defined in these files.
 include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/Common.cmake")
+# HU_NATIVE_SCAN (default ON): imports are scanned by hu-mapper; OFF: by CMake (the same result, slower).
+if(DEFINED HU_NATIVE_SCAN AND NOT HU_NATIVE_SCAN)
+  set_property(GLOBAL PROPERTY _HU_NATIVE_SCAN OFF)
+else()
+  set_property(GLOBAL PROPERTY _HU_NATIVE_SCAN ON)
+endif()
+_hu_build_helper()
 if(_HU_TC STREQUAL "GCC")      # toolchain setup and strategy macros
   include("${CMAKE_CURRENT_LIST_DIR}/HeaderUnits/GCC.cmake")
 elseif(_HU_TC STREQUAL "MSVC")

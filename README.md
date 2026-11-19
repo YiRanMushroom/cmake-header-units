@@ -117,6 +117,10 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
 * `import "x";` found next to the importing source is used by absolute path, like the compiler's quote lookup.
 * The scanned sources become `CMAKE_CONFIGURE_DEPENDS`, so adding an import re-runs CMake. `NO_RECONFIGURE` turns this
   off.
+* The scan and the header lookup run in `hu-mapper` (see "How it works"), all requests of a directory in one run, with
+  a cache of each source's import lines by modification time and size (`CMakeFiles/header_units/scan-cache.txt`), so a
+  reconfigure reads only the sources that changed. `-DHU_NATIVE_SCAN=OFF`, or a compiler that cannot build
+  `hu-mapper`, scans with CMake instead: the same result, slower.
 * Only literal import declarations are recognized:
   * imports produced by macros are not;
   * imports inside `#if` are considered whatever the condition. A header that cannot be found with the target's include
@@ -234,6 +238,13 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * Everything happens at configure time: targets, source properties, mapper files and the header lookup (one
   `-E -v` compiler run per distinct set of options, about 0.1 s each, plus the self-check). A deferred call finalizes
   after all CMakeLists have run. The header units themselves are compiled at build time, by Ninja.
+* `hu-mapper` (`cmake/HeaderUnits/hu-mapper.cpp`, C++17, no dependencies) is built once per build tree at configure
+  time with the project's compiler (cross-compiling: a host compiler, see GCC below), rebuilt only when its source
+  changes. It scans sources for import declarations and the `textual-includes` marker, resolves the
+  imported names against the search list, and keeps a scan cache; with GCC it is also the module mapper. It computes
+  what the CMake functions `_hu_scan_imports`, `_hu_import_name` and `_hu_find_header` compute, which remain the
+  fallback. On a project of 1000 sources in 20 targets with `target_auto_header_units`, a reconfigure took about 2 s
+  with `hu-mapper`'s scan and 3-3.5 s with CMake's (MinGW GCC, clang++ and MSVC; the same build files either way).
 * BMI paths are spelled relative to the build directory, so compiler depfiles name the same Ninja nodes and an edit
   rebuilds everything that depends on it in one `ninja` run.
 
@@ -349,7 +360,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
 cmake/HeaderUnits.cmake          entry point: include(HeaderUnits)
 cmake/HeaderUnits/Core.cmake     add_header_units, target_import_header_units, finalization
 cmake/HeaderUnits/Common.cmake   header lookup, import scanning, usage requirements, compatibility check
-cmake/HeaderUnits/hu-mapper.cpp  GCC: the module mapper of header units and consumers (built at configure time)
+cmake/HeaderUnits/hu-mapper.cpp  the import scan at configure time; GCC: the module mapper (built at configure time)
 cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy

@@ -1,0 +1,3 @@
+// generated into the build tree: a consumer source there (GCC's hu-index.txt keys it by Ninja's relative spelling)
+import <gen_config.h>;
+int gen_src() { return GEN_VALUE * 2; }

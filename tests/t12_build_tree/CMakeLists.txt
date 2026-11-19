@@ -15,8 +15,10 @@ FetchContent_MakeAvailable(tinydep)
 # A header generated at configure time into the build tree.
 set(T12_VALUE 3)
 configure_file(gen_config.h.in "${CMAKE_BINARY_DIR}/gen/gen_config.h")
+# A consumer source generated at configure time into the build tree.
+configure_file(gen_src.cpp.in "${CMAKE_BINARY_DIR}/gen/gen_src.cpp" COPYONLY)
 
-add_executable(t12 main.cpp other.cpp)
+add_executable(t12 main.cpp other.cpp "${CMAKE_BINARY_DIR}/gen/gen_src.cpp")
 target_include_directories(t12 PRIVATE "${CMAKE_BINARY_DIR}/gen")
 target_link_libraries(t12 PRIVATE tinydep)
 target_auto_header_units(t12)
