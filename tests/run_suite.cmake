@@ -102,7 +102,7 @@ if(CMAKE_HOST_WIN32)
 else()
   set(EXE "")
 endif()
-set(ALL_TESTS t01_stl t02_thirdparty t03_named_modules t04_shared_set t05_rebuild t06_mixed t07_own_headers t08_auto t09_header_import_error t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma t15_scan_sources t16_deferred t17_lookup t18_spelling t19_scale t20_wrong_file t21_self_include t22_import_std t23_multi_config t24_two_sets t25_shared_source t26_shared_targets t27_module_two_targets)
+set(ALL_TESTS t01_stl t02_thirdparty t03_named_modules t04_shared_set t05_rebuild t06_mixed t07_own_headers t08_auto t09_header_import_error t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma t15_scan_sources t16_deferred t17_lookup t18_spelling t19_scale t20_wrong_file t21_self_include t22_import_std t23_multi_config t24_two_sets t25_shared_source t26_shared_targets t27_module_two_targets t28_cxx_sources)
 if(NOT TESTS)
   set(TESTS ${ALL_TESTS})
 endif()
@@ -1790,6 +1790,17 @@ function(test_t27_module_two_targets bdir)
   hu_build_check(t27_module_two_targets "${bdir}")
   bail_if_failed()
   evid("one module interface source in two targets of one directory: the importers of both targets build and run")
+endfunction()
+
+# A target's C++ sources (t28), one rule for the scan and the header units: each source imports a header no other
+# source imports, so one not scanned or not given the header units fails the build; a HEADER_FILE_ONLY source would
+# bring a header that does not compile.
+function(test_t28_cxx_sources bdir)
+  hu_configure(t28_cxx_sources "${bdir}")
+  bail_if_failed()
+  hu_build_check(t28_cxx_sources "${bdir}")
+  bail_if_failed()
+  evid("scanned and given header units: a module unit of the default CXX_MODULES file set, a build-directory source listed by a relative path (also by target_header_units_scan_sources), a .c file with LANGUAGE CXX; not scanned: a HEADER_FILE_ONLY source; skipped: generator-expression sources (a configuration's source, TARGET_OBJECTS)")
 endfunction()
 
 # -------------------------------------------------------------------------------------------------- main

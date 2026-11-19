@@ -1,0 +1,3 @@
+import <t28_gen.h>;
+
+int gen() { return t28_gen(); }
