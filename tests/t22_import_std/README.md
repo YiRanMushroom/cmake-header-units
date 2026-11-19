@@ -1,0 +1,1 @@
+t22: `import std;` (CMake's CMAKE_CXX_MODULE_STD) in the same TUs as a header unit whose header includes `<string>`: one TU imports both, another #includes the header (translated to an import) and imports std.

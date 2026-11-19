@@ -439,6 +439,7 @@ Each test is a standalone CMake project with a one-line README:
 | t19_scale | 5 and 40 targets, each with its own include directory and header: the number of compiler runs for the lookup is the same |
 | t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
 | t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler), and with its headers in a directory with a space (with `HU_GCC_WRAPPERS` a configure error) |
+| t22_import_std | `import std;` (CMake's `CMAKE_CXX_MODULE_STD`) in the same TUs as a header unit whose header includes `<string>`: one TU imports both, another `#include`s the header next to `import std;`. Needs CMake 4.5 (SKIP before: `import std` is experimental there); with Clang in the Linux image the driver names GCC's `libstdc++.modules.json` |
 
 For each test, `tests/run_suite.cmake` runs:
 
