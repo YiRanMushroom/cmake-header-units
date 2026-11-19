@@ -1,7 +1,7 @@
 # Test driver for the HeaderUnits prototype (portable: runs on Linux and Windows).
 #
-#   cmake -DTC=gcc|clang|libcxx|win|mingw|msvc -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03]
-#         [-DFRESH=ON] -P tests/run_suite.cmake
+#   cmake -DTC=gcc|clang|libcxx|win|clangcl|mingw|msvc -DCMAKE_EXE=<cmake under test> -DTAG=<label> [-DTESTS=t01;t03]
+#         [-DFRESH=ON] [-DEXTRA_ARGS=<configure arguments>] -P tests/run_suite.cmake
 #
 # For every test: fresh configure + build (-j, Ninja default), ctest, no-op rebuild, build.ninja edge check
 # (scan AND compile of every header-unit consumer depend on its BMIs), depfile evidence (imported headers
@@ -62,6 +62,13 @@ elseif(TC STREQUAL "win")
   endif()
   set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX})
   set(OBJ .obj)
+elseif(TC STREQUAL "clangcl")
+  # clang-cl (Clang's MSVC-style driver) with the MSVC STL, from a developer prompt; CLANG_CXX as for TC=win
+  if(NOT DEFINED CLANG_CXX OR CLANG_CXX STREQUAL "")
+    set(CLANG_CXX clang-cl)
+  endif()
+  set(TC_ARGS -DCMAKE_CXX_COMPILER=${CLANG_CXX})
+  set(OBJ .obj)
 elseif(TC STREQUAL "mingw")
   # GCC on Windows (MinGW-w64); its bin directory must be on PATH for the test executables' runtime DLLs
   if(NOT DEFINED MINGW_CXX)
@@ -74,7 +81,7 @@ elseif(TC STREQUAL "msvc")
   set(TC_ARGS -DCMAKE_CXX_COMPILER=cl)
   set(OBJ .obj)
 else()
-  message(FATAL_ERROR "TC must be gcc, clang, libcxx, win, mingw or msvc")
+  message(FATAL_ERROR "TC must be gcc, clang, libcxx, win, clangcl, mingw or msvc")
 endif()
 list(APPEND TC_ARGS ${EXTRA_ARGS})   # -DEXTRA_ARGS=...: more configure arguments for every test (e.g. -DHU_NATIVE_SCAN=OFF)
 if(CMAKE_HOST_WIN32)
@@ -637,8 +644,8 @@ function(test_t04_shared_set bdir)
   hu_build_check(t04_shared_set "${bdir}")
   bail_if_failed()
   set(variants std ext exc abi dup)
-  if(TC STREQUAL "msvc")
-    list(REMOVE_ITEM variants ext)                  # MSVC has no GNU extensions: CXX_EXTENSIONS changes nothing
+  if(TC MATCHES "^(msvc|clangcl)$")
+    list(REMOVE_ITEM variants ext)                  # no GNU extensions (-std:c++NN either way): CXX_EXTENSIONS changes nothing
   endif()
   foreach(v IN LISTS variants)
     set(bb "${bdir}-bad-${v}")
@@ -973,6 +980,11 @@ endfunction()
 function(ide_probe_check bdir set)
   if(TC STREQUAL "msvc")
     evid("IDE-style probe: not run with MSVC (GCC/Clang -E syntax)")
+    return()
+  endif()
+  if(TC STREQUAL "clangcl")
+    # clang-cl names a header unit's PCM with /clang:-o, which overrides any -o: a -E run would write over the PCM
+    evid("IDE-style probe: not run with clang-cl (a -E run of the header-unit flags writes over the PCM, see README)")
     return()
   endif()
   file(STRINGS "${bdir}/CMakeCache.txt" cl REGEX "^CMAKE_CXX_COMPILER:")

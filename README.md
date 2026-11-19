@@ -14,13 +14,14 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 | Clang 22 + libstdc++ 16 (Linux) | Ninja | this module |
 | Clang 22 + libc++ 22 (Linux) | Ninja | this module |
 | Clang 22 (`clang++`, GNU-style driver) + MSVC STL (Windows) | Ninja | this module |
+| Clang 22 (`clang-cl`, MSVC-style driver) + MSVC STL (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Visual Studio 17 2022 | MSBuild (the commands do nothing) |
 | MinGW-w64 GCC 16.1 + libstdc++ (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Ninja | this module |
 
-MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja with CMake 4.5.0 (see Results).
+MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja and clang-cl with CMake 4.5.0 (see Results).
 
-Not supported: clang-cl, multi-config generators with GCC/Clang/MSVC-Ninja.
+Not supported: multi-config generators with GCC/Clang/MSVC-Ninja.
 
 ## Quick start
 
@@ -62,7 +63,7 @@ Not supported: clang-cl, multi-config generators with GCC/Clang/MSVC-Ninja.
 4. Configure and build:
 
    ```sh
-   cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++     # or clang++
+   cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=g++     # or clang++, or clang-cl (from a developer prompt)
    cmake --build build
    # MSVC:
    cmake -S . -B build -G "Visual Studio 17 2022"
@@ -90,9 +91,9 @@ target_import_header_units(app hu_std)                    # all C++ sources of a
 target_import_header_units(app hu_fmt SOURCES main.cpp)   # only main.cpp
 ```
 
-Requirements: GCC/Clang need CMake >= 4.2, the single-config **Ninja** generator and C++20 or later. MSVC needs CMake
->= 3.28 and a Visual Studio generator, or CMake >= 4.2, Ninja and MSVC 19.40 (Visual Studio 2022 17.10) or later, run
-from a developer prompt.
+Requirements: GCC/Clang need CMake >= 4.2, the single-config **Ninja** generator and C++20 or later; clang-cl runs
+from a developer prompt. MSVC needs CMake >= 3.28 and a Visual Studio generator, or CMake >= 4.2, Ninja and MSVC 19.40
+(Visual Studio 2022 17.10) or later, run from a developer prompt.
 
 ## Commands
 
@@ -157,12 +158,13 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
   set's target, first match: its `-I` directories (with those of `include_directories()` and
   `CMAKE_INCLUDE_CURRENT_DIR`), then `-isystem` ones such as an imported target's, then the compiler's own. The
   compiler reports its own list (`<compiler> <flags> -x c++ -E -v`) once per distinct set of options, with two marker
-  directories where CMake puts a target's `-I` and `-isystem` directories; a target's list is that list with its own
-  directories in their places. So the number of compiler runs follows the number of distinct option sets (usually
-  one to three), not the number of targets; configure prints it. Nothing is compiled at configure time. A
-  configure-time self-check (one more run, with the options of the first lookup) stops the configure if the compiler
-  finds or names headers otherwise than this predicts; if its probe cannot run, it only warns. A header found only through a directory given as an unevaluable generator expression is not found:
-  pass that directory with `INCLUDE_DIRECTORIES`.
+  directories where CMake puts a target's `-I` and `-isystem` directories (with clang-cl `-imsvc`, which it searches
+  after its own include directory); a target's list is that list with its own directories in their places. So the
+  number of compiler runs follows the number of distinct option sets (usually one to three), not the number of
+  targets; configure prints it. Nothing is compiled at configure time. A configure-time self-check (one more run, with
+  the options of the first lookup) stops the configure if the compiler finds or names headers otherwise than this
+  predicts; if its probe cannot run, it only warns. A header found only through a directory given as an unevaluable
+  generator expression is not found: pass that directory with `INCLUDE_DIRECTORIES`.
 * `LINK_LIBRARIES` supplies include directories and definitions, from imported or in-tree targets. In-tree link
   interfaces are followed recursively: ALIAS targets are resolved, private (`$<LINK_ONLY:>`) dependencies are not
   followed.
@@ -179,7 +181,8 @@ target_import_header_units(<target> <set> [SOURCES <src>...])
 
 Gives the set's header units to all C++ sources of the target, or only to the listed ones.
 
-* The consumer's language settings must match the set's: C++ standard, extensions, exception and RTTI options,
+* The consumer's language settings must match the set's: C++ standard, extensions (not with MSVC and clang-cl, where
+  they change nothing), exception and RTTI options,
   `CMAKE_CXX_FLAGS`, and definitions that change the C++ library's ABI (`_GLIBCXX_DEBUG`, `_GLIBCXX_USE_CXX11_ABI`,
   `_LIBCPP_ABI_*`; with the MSVC STL `_ITERATOR_DEBUG_LEVEL`, `_HAS_ITERATOR_DEBUGGING`, `_SECURE_SCL`,
   `_HAS_EXCEPTIONS` and `MSVC_RUNTIME_LIBRARY`) from the target, its directory and its link interface. This is checked
@@ -282,7 +285,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
   configure time). Mapper files get short hashed names, because paths past 260 characters do not open, and `\n` line
   ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
-**Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
+**Clang**, `clang++` and `clang-cl` (`cmake/HeaderUnits/Clang.cmake`), uses lazy, named header units (the Buck2
+scheme):
 
 * A module map declares the real header as the only header of a module, and the BMI is built with `-fmodule-name`.
 * Consumers get `-fmodule-map-file` and `-fmodule-file=<name>=<bmi>` in a response file, one per distinct content (sources
@@ -291,6 +295,9 @@ defined before the include take effect. Use it for the one source of an stb-styl
   its header.
 * The response file keeps command lines short: CMake runs the dependency scan on Windows through cmd.exe, which
   allows at most 8191 characters.
+* `clang-cl` gets the same options; those it has no cl spelling for take the `/clang:` prefix: `-fmodule-name`,
+  `-fmodule-file-deps`, and `-o`, which names the BMI. `clang-cl` writes a header unit's BMI neither to `/Fo` nor to
+  its own `-o`, which is cl's `/o`; CMake's own rule for a named module's BMI uses `-clang:-o` the same way.
 
 **MSVC with a Visual Studio generator** (`cmake/HeaderUnits/MSVC.cmake`):
 
@@ -324,8 +331,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
    a CMake release changes the template. On Windows the override also names CMake's module map as `$out.modmap`
    (observed: the object path plus `.modmap`), since CMake spells `<MODULE_MAP_FILE>` with backslashes there.
 2. The object location `<set binary dir>/CMakeFiles/<set>.dir/<OBJECT_NAME><ext>`, i.e. the default
-   `CMAKE_INTERMEDIATE_DIR_STRATEGY` (`SHORT` is rejected). If CMake moved objects, Ninja would stop with "missing and no
-   known rule": a loud failure, never a silent misbuild.
+   `CMAKE_INTERMEDIATE_DIR_STRATEGY` (`SHORT` is rejected); `clang-cl` is told to write the BMI there. If CMake moved
+   objects, Ninja would stop with "missing and no known rule": a loud failure, never a silent misbuild.
 3. Observed Ninja-generator behaviour: per-source `COMPILE_OPTIONS` and `OBJECT_DEPENDS` also apply to the scan
    statement. The test driver re-checks this in build.ninja on every run.
 4. MSVC with Ninja: `/translateInclude-` is appended to `CMAKE_CXX_SCANDEP_SOURCE`, the template of CMake's dependency-scan
@@ -355,6 +362,9 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * Clang with libc++ from the Debian or apt.llvm.org packages and CMake 4.5: the configure of every C++20 project fails,
   with or without this module, unless `CMAKE_CXX_STDLIB_MODULES_JSON` names
   `/usr/lib/llvm-<version>/lib/libc++.modules.json` (see Tests, How to run).
+* clang-cl: a header unit's compile names its BMI with `/clang:-o`, which takes precedence over any other `-o`. A tool
+  that reruns that command with `-E` or `/E`, as an IDE may do to read the compiler's settings, writes its output over
+  the BMI unless it removes that option. Delete the BMI afterwards, so the next build makes it again.
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
@@ -383,6 +393,7 @@ tests/attack/                    adversarial scenarios (run_attack.cmake, RESULT
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
 run-linux.sh, run-win.bat        run the suite (Linux: GCC, Clang + libstdc++, Clang + libc++; Windows: clang++ + MSVC STL)
+run-clangcl.bat                  run the suite with clang-cl + MSVC STL
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
 run-msvc-ninja.bat               run the suite with MSVC and Ninja
 docker/                          the Linux toolchain image used for development (GCC 16, Clang 22 with libc++, fmt, json, Boost)
@@ -462,9 +473,11 @@ How to run:
   ```
 
   `MINGW_CXX` defaults to `g++`; the results land in `_build/mingw-local/results.txt`.
-* Windows, clang++: `vcvars64.bat` puts Visual Studio's own, older Clang (19.1.5 with Visual Studio 2022 17.14) first on
-  PATH, which cannot build header units of the C++ library with Windows SDK 10.0.26100; `set CLANG_CXX=<path to
-  clang++.exe>` selects another.
+* Windows, clang-cl + MSVC STL: `run-clangcl.bat` (`TC=clangcl`), with the same requirements as `run-win.bat`. The IDE
+  probe of t17 does not apply (see Limitations), nor does t04's extensions variant (`-std:c++NN` either way).
+* Windows, clang++ and clang-cl: `vcvars64.bat` puts Visual Studio's own, older Clang (19.1.5 with Visual Studio 2022
+  17.14) first on PATH, which cannot build header units of the C++ library with Windows SDK 10.0.26100; `set
+  CLANG_CXX=<path to clang++.exe or clang-cl.exe>` selects another.
 * Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest with a Visual Studio generator; t04 and t09 are
   skipped. `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
   header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
@@ -486,6 +499,11 @@ builds and runs with GCC 16.2, Clang 22 + libstdc++ and Clang 22 + libc++, as do
 units. With Clang in the image, CMake finds the C++ library's modules file only when `CMAKE_CXX_STDLIB_MODULES_JSON`
 names it, with or without this module: for libstdc++ CMake asks `clang++ -print-file-name=libstdc++.modules.json`
 without `CMAKE_CXX_FLAGS`, so `--gcc-toolchain` does not apply and Clang names no file; for libc++ see How to run.
+
+**2026-11-19, clang-cl, Windows 11, CMake 4.5.0** (fresh build directories; LLVM 22.1.8, Visual Studio 2022 17.14 with
+the MSVC 19.44 STL, Windows SDK 10.0.26100): clang-cl (`TC=clangcl`): 21/21 PASS. The changes for clang-cl also touch
+the header lookup and the compatibility check; after them, clang++ 22.1.8 (`TC=win`) passes t01, t04, t10, t14, t17
+and t19, and MSVC with Ninja (`TC=msvc`) passes t04. The other tests and toolchains were not rerun for these changes.
 
 **2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
 10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way

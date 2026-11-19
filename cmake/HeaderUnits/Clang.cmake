@@ -1,4 +1,5 @@
-# HeaderUnits/Clang.cmake -- the Clang strategy (clang++ with the GNU-style driver; libstdc++, libc++ or the MSVC STL).
+# HeaderUnits/Clang.cmake -- the Clang strategy (clang++ with the GNU-style driver, libstdc++, libc++ or the MSVC STL;
+# clang-cl with the MSVC-style driver and the MSVC STL).
 #
 # * Lazy, named header units (Buck2-style): a module map declares the real header as the only header of module
 #   <name>; the BMI (PCM) is the set's object file, built with -fmodule-name=<name> (without seeing the module map).
@@ -7,10 +8,19 @@
 #   resolves to the header becomes an import of <name>,
 #   and a PCM is only read by TUs that reach its header.
 # * PCMs are spelled relative to the top build dir, so depfiles (-fmodule-file-deps) name the same Ninja nodes.
+# * clang-cl gets the same options, those it has no cl spelling for with the /clang: prefix (_HU_CLANG_FWD).
 #
 # The macros below run in the scope of the Core.cmake function that calls them (cmake_language(CALL _hu_Clang_...)).
 
 include_guard(GLOBAL)
+
+# clang-cl (CMAKE_CXX_COMPILER_FRONTEND_VARIANT MSVC) takes the clang options it does not know as /clang:<option>:
+# -fmodule-name, -fmodule-file-deps, and -o (clang-cl's own -o is cl's /o, which does not name a PCM).
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+  set_property(GLOBAL PROPERTY _HU_CLANG_FWD "/clang:")
+else()
+  set_property(GLOBAL PROPERTY _HU_CLANG_FWD "")
+endif()
 
 # add_header_units(), per header: in: set, h, p, oname, hudir; appends cmis, mids, mmaps.
 macro(_hu_Clang_add_header)
@@ -39,14 +49,25 @@ macro(_hu_Clang_add_header)
     file(CONFIGURE OUTPUT "${mmap}" CONTENT "module \"${mid}\" {\n  header \"${p}\"\n  export *\n}\n")
     list(APPEND mids "${mid}")
     list(APPEND mmaps "${mmap}")
+    get_property(_hu_fwd GLOBAL PROPERTY _HU_CLANG_FWD)
+    set(copts "-fmodule-header=system" "-xc++-system-header" "${_hu_fwd}-fmodule-name=${mid}")
+    if(_hu_fwd)
+      # clang-cl writes a header unit's PCM where /clang:-o says, not to /Fo (CMake's own clang-cl rule for a named
+      # module's BMI, CMAKE_CXX_COMPILE_BMI, names it with -clang:-o too): the object path below, relative to the top
+      # build dir.  The options are shared by every set of this directory with this header, so the set's directory is
+      # spelled $<TARGET_PROPERTY:NAME>: the target that compiles it.
+      file(RELATIVE_PATH od "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
+      list(APPEND copts "/clang:-o${od}/$<TARGET_PROPERTY:NAME>.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+    endif()
+    list(APPEND copts "-Wno-unused-command-line-argument")
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
-      COMPILE_OPTIONS "-fmodule-header=system;-xc++-system-header;-fmodule-name=${mid};-Wno-unused-command-line-argument")
+      COMPILE_OPTIONS "${copts}")
     # CMAKE-INTERNAL: location of an object file (<target binary dir>/CMakeFiles/<target>.dir/<OBJECT_NAME><ext>
     # with the default CMAKE_INTERMEDIATE_DIR_STRATEGY=FULL).  Needed because OBJECT_DEPENDS does not accept
-    # $<TARGET_OBJECTS>.  If CMake ever places the object elsewhere, Ninja stops with "missing and no known
-    # rule to make it" (loud failure, never a silent misbuild).
+    # $<TARGET_OBJECTS> (and, for clang-cl, to name the PCM above).  If CMake ever places the object elsewhere, Ninja
+    # stops with "missing and no known rule to make it" (loud failure, never a silent misbuild).
     list(APPEND cmis "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
 endmacro()
 
@@ -66,7 +87,8 @@ endmacro()
 
 # _hu_finalize(), HU_ALLOW_HEADER_IMPORTS: options of header p's own compile.
 macro(_hu_Clang_header_import_done)
-    list(APPEND opts "-fmodule-file-deps" "-Wno-experimental-header-units")
+    get_property(_hu_fwd GLOBAL PROPERTY _HU_CLANG_FWD)
+    list(APPEND opts "${_hu_fwd}-fmodule-file-deps" "-Wno-experimental-header-units")
 endmacro()
 
 # _hu_finalize(), after every consumer source: nothing to do for Clang.
@@ -122,7 +144,8 @@ macro(_hu_Clang_consumer_options)
       set(_hu_cd_${_hu_ck} "${_hu_cdeps}")
     endif()
   endif()
-    list(APPEND opts "@${rsp}" "-fmodule-file-deps" "-Wno-experimental-header-units" "-Wno-ambiguous-macro")
+    get_property(_hu_fwd GLOBAL PROPERTY _HU_CLANG_FWD)
+    list(APPEND opts "@${rsp}" "${_hu_fwd}-fmodule-file-deps" "-Wno-experimental-header-units" "-Wno-ambiguous-macro")
     list(APPEND deps "${rsp}")
 endmacro()
 

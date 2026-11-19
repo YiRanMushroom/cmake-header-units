@@ -12,7 +12,7 @@ snippet = "function(_hu_target_search p tgt)"
 
 [[items]]
 name = "base-run"
-value = "Key: ARG1, CMAKE_CXX_FLAGS(+_<CFG>), sysroot/target/toolchain, the -std option (GCC refuses -freflection without it), options except -W/-D/-U/-O/-g. No include dirs: marker dirs -I mI -isystem mS stand for them. A printed list is used whatever the exit code."
+value = "Key: ARG1, CMAKE_CXX_FLAGS(+_<CFG>), sysroot/target/toolchain, the -std option (GCC refuses -freflection without it), options except -W/-D/-U/-O/-g. No include dirs: marker dirs -I mI -isystem mS stand for them (clang-cl: -I mI /external:I mB -imsvc mS, see clang.clang-cl). A printed list is used whatever the exit code."
 path = "cmake/HeaderUnits/Common.cmake"
 snippet = "function(_hu_search_base p)"
 
