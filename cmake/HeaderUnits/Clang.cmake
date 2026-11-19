@@ -3,7 +3,8 @@
 # * Lazy, named header units (Buck2-style): a module map declares the real header as the only header of module
 #   <name>; the BMI (PCM) is the set's object file, built with -fmodule-name=<name> (without seeing the module map).
 # * A consumer source gets -fmodule-map-file + -fmodule-file=<name>=<pcm> for each of its header units, in a
-#   per-source response file: every #include / import that resolves to the header becomes an import of <name>,
+#   response file (one per distinct content, shared by sources with the same sets): every #include / import that
+#   resolves to the header becomes an import of <name>,
 #   and a PCM is only read by TUs that reach its header.
 # * PCMs are spelled relative to the top build dir, so depfiles (-fmodule-file-deps) name the same Ninja nodes.
 #
@@ -74,7 +75,16 @@ endmacro()
 
 # _hu_finalize(), per consumer source: in: t, src, tsets, sdk, hudir; appends opts and deps.
 macro(_hu_Clang_consumer_options)
+  # The response file depends only on the sets (and, for a "textual-includes" source, its imports): computed once per
+  # set list and shared by the sources that have it, named by its content.  (Variables of the calling
+  # _hu_finalize_run, which runs once.)
+  string(MD5 _hu_ck "${tsets}")
+  if(NOT hu_textual AND DEFINED _hu_cr_${_hu_ck})
+    list(APPEND deps ${_hu_cd_${_hu_ck}})
+    set(rsp "${_hu_cr_${_hu_ck}}")
+  else()
     set(rsp_lines "")
+    set(_hu_cdeps)
     foreach(s IN LISTS tsets)
       get_property(pcms GLOBAL PROPERTY _HU_SET_${s}_CMIS)
       get_property(mids GLOBAL PROPERTY _HU_SET_${s}_MIDS)
@@ -84,7 +94,7 @@ macro(_hu_Clang_consumer_options)
         if(hu_textual AND NOT pp IN_LIST hu_only)
           continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
         endif()
-        list(APPEND deps "${pcm}")
+        list(APPEND _hu_cdeps "${pcm}")
         # Spell the PCM relative to the top build dir (Ninja's cwd and node names): -fmodule-file-deps writes it
         # into the depfile as spelled, and an absolute spelling would be a different Ninja node (consumers would
         # only rebuild on the NEXT ninja run after a header edit).
@@ -99,10 +109,19 @@ macro(_hu_Clang_consumer_options)
     # The header-unit options go into a response file: CMake runs the dependency scan through cmd.exe on Windows
     # (8191 characters), and every header unit adds two long options.  The file is a dependency of the scan and
     # the compile (file(CONFIGURE) rewrites it only when its content changes).
-    string(SUBSTRING "${sdk}" 0 16 rk)
-    get_filename_component(sn "${src}" NAME)
-    set(rsp "${hudir}/rsp/${rk}_${sn}.rsp")
-    file(CONFIGURE OUTPUT "${rsp}" CONTENT "${rsp_lines}" @ONLY)
+    string(MD5 rk "${rsp_lines}")
+    string(SUBSTRING "${rk}" 0 16 rk)
+    set(rsp "${hudir}/rsp/${rk}.rsp")
+    if(NOT DEFINED _hu_cw_${rk})
+      set(_hu_cw_${rk} 1)
+      file(CONFIGURE OUTPUT "${rsp}" CONTENT "${rsp_lines}" @ONLY)
+    endif()
+    list(APPEND deps ${_hu_cdeps})
+    if(NOT hu_textual)
+      set(_hu_cr_${_hu_ck} "${rsp}")
+      set(_hu_cd_${_hu_ck} "${_hu_cdeps}")
+    endif()
+  endif()
     list(APPEND opts "@${rsp}" "-fmodule-file-deps" "-Wno-experimental-header-units" "-Wno-ambiguous-macro")
     list(APPEND deps "${rsp}")
 endmacro()

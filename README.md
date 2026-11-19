@@ -269,7 +269,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
 **Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
 
 * A module map declares the real header as the only header of a module, and the BMI is built with `-fmodule-name`.
-* Consumers get `-fmodule-map-file` and `-fmodule-file=<name>=<bmi>` in a per-source response file. Any `#include` or
+* Consumers get `-fmodule-map-file` and `-fmodule-file=<name>=<bmi>` in a response file, one per distinct content (sources
+  with the same sets share it). Any `#include` or
   `import` that resolves to the header becomes an import, in any order, and a BMI is only read by sources that reach
   its header.
 * The response file keeps command lines short: CMake runs the dependency scan on Windows through cmd.exe, which
@@ -285,7 +286,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
   as the set's object file, so it is a real Ninja output.
 * Each consumer source gets `/headerUnit "<header>=<ifc>"` for its header units and `/translateInclude` in a
-  per-source response file. CMake's dependency scan gets the per-source options too, and `cl /scanDependencies` with
+  response file (one per distinct content). CMake's dependency scan gets the per-source options too, and `cl /scanDependencies` with
   `/translateInclude` recurses without end into a header that includes itself through another one, so CMake's scan rule
   gets `/translateInclude-` at its end.
 * The header lookup assembles the include search list from the target's `/I` and `/external:I` directories, those in

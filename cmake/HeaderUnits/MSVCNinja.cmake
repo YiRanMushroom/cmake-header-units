@@ -5,7 +5,8 @@
 #   written as the set's object file (/ifcOutput), so it is a real Ninja output, rebuilt when it is deleted (like GCC's
 #   -fmodule-only CMI).  The header's own #includes stay textual (no /translateInclude there).
 # * A consumer source gets /headerUnit "<path>=<ifc>" for each of its header units, and /translateInclude, in a
-#   per-source response file: an import of the header, or an #include of it, uses the IFC.  The dependency scan gets
+#   response file (one per distinct content): an import of the header, or an #include of it, uses the IFC.  The
+#   dependency scan gets
 #   "/translateInclude-" (see below).
 # * IFCs are spelled relative to the top build dir (Ninja's working directory).
 # * CMake's own module scan (cl /scanDependencies) accepts an import of a header unit; it gets the same options.
@@ -73,20 +74,35 @@ endmacro()
 # _hu_finalize(), per consumer source: in: t, src, tsets, sdk, hudir; appends opts and deps.
 macro(_hu_MSVC_consumer_options)
     string(MD5 tk "${t}")
-    set(rsp_lines "")
-    foreach(s IN LISTS tsets)
-      get_property(ps GLOBAL PROPERTY _HU_SET_${s}_PATHS)
-      get_property(c GLOBAL PROPERTY _HU_SET_${s}_CMIS)
-      foreach(pp cmi IN ZIP_LISTS ps c)
-        if(hu_textual AND NOT pp IN_LIST hu_only)
-          continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
-        endif()
-        file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
-        file(TO_NATIVE_PATH "${pp}" np)
-        string(APPEND rsp_lines "/headerUnit \"${np}=${rc}\"\n")
-        list(APPEND deps "${cmi}")
+    # The mappings depend only on the sets (and, for a "textual-includes" source, its imports): computed once per set
+    # list; the response file is shared by the sources that have the same content.  (Variables of the calling
+    # _hu_finalize_run, which runs once.)
+    string(MD5 _hu_mk "${tsets}")
+    if(NOT hu_textual AND DEFINED _hu_ml_${_hu_mk})
+      set(rsp_lines "${_hu_ml_${_hu_mk}}")
+      list(APPEND deps ${_hu_md_${_hu_mk}})
+    else()
+      set(rsp_lines "")
+      set(_hu_mdeps)
+      foreach(s IN LISTS tsets)
+        get_property(ps GLOBAL PROPERTY _HU_SET_${s}_PATHS)
+        get_property(c GLOBAL PROPERTY _HU_SET_${s}_CMIS)
+        foreach(pp cmi IN ZIP_LISTS ps c)
+          if(hu_textual AND NOT pp IN_LIST hu_only)
+            continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
+          endif()
+          file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
+          file(TO_NATIVE_PATH "${pp}" np)
+          string(APPEND rsp_lines "/headerUnit \"${np}=${rc}\"\n")
+          list(APPEND _hu_mdeps "${cmi}")
+        endforeach()
       endforeach()
-    endforeach()
+      list(APPEND deps ${_hu_mdeps})
+      if(NOT hu_textual)
+        set(_hu_ml_${_hu_mk} "${rsp_lines}")
+        set(_hu_md_${_hu_mk} "${_hu_mdeps}")
+      endif()
+    endif()
     # A module interface unit: an importer of its module needs the header units it imports as well (cl looks them up
     # when it reads the module's IFC), whatever its own imports; they go to the target's INTERFACE_COMPILE_OPTIONS.
     if(NOT DEFINED _hu_mf_${tk})
@@ -113,11 +129,14 @@ macro(_hu_MSVC_consumer_options)
       set_property(GLOBAL APPEND_STRING PROPERTY _HU_MSVC_IFACE_${tk} "${rsp_lines}")   # (the mappings only)
     endif()
     string(APPEND rsp_lines "/translateInclude\n")   # an #include of a header with a header unit imports it
-    # A response file, as with Clang: CMake runs some commands through cmd.exe (8191 characters).
-    string(SUBSTRING "${sdk}" 0 16 rk)
-    get_filename_component(sn "${src}" NAME)
-    set(rsp "${hudir}/rsp/${rk}_${sn}.rsp")
-    file(CONFIGURE OUTPUT "${rsp}" CONTENT "${rsp_lines}" @ONLY)
+    # A response file, as with Clang: CMake runs some commands through cmd.exe (8191 characters).  Named by content.
+    string(MD5 rk "${rsp_lines}")
+    string(SUBSTRING "${rk}" 0 16 rk)
+    set(rsp "${hudir}/rsp/${rk}.rsp")
+    if(NOT DEFINED _hu_mw_${rk})
+      set(_hu_mw_${rk} 1)
+      file(CONFIGURE OUTPUT "${rsp}" CONTENT "${rsp_lines}" @ONLY)
+    endif()
     list(APPEND opts "@${rsp}")
     list(APPEND deps "${rsp}")
 endmacro()
