@@ -1,7 +1,7 @@
 +++
 title = "Header lookup: one -E -v per option set, each target's list assembled in CMake, self-check; GCC keys per consumer"
 keys = [ "configure time", "gcc", "lookup", "search list", "spelling", "try_compile" ]
-updated = "2026-11-18 23:13:42"
+updated = "2026-11-19 17:27:47"
 checked = "2026-11-18"
 
 [[items]]
@@ -24,7 +24,7 @@ snippet = "function(_hu_search_list p)"
 
 [[items]]
 name = "gcc-keys"
-value = "GCC names a header unit by its spelling (Linux keeps -I dirs as given, MinGW normalizes all). Keys come from the writing compile's own list: first dir holding <name>, if the same file: its spelling+\"/name\", normalized; always p and real path (t18)."
+value = "GCC names a header unit by its spelling (Linux keeps -I dirs as given, MinGW normalizes). A source's map has the keys of every target compiling it (gcc.consumer-maps, t25): first dir holding <name>, if the same file: its spelling+\"/name\", normalized; always p, real path (t18)."
 path = "cmake/HeaderUnits/GCC.cmake"
 snippet = "function(_hu_gcc_keys out p name)"
 

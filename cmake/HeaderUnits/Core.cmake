@@ -406,7 +406,8 @@ function(_hu_finalize_run)
     get_property(tsets GLOBAL PROPERTY _HU_TU_${k}_SETS)
     list(REMOVE_DUPLICATES tsets)
     list(SORT tsets)
-    # One source file -> one set list (source properties are per directory; GCC's map is per source path).
+    # One source file -> one set list (source properties are per directory; GCC's map is per source path, and holds the
+    # spellings of all the targets that compile the source).
     string(MD5 sk "${src}")
     get_property(prev GLOBAL PROPERTY _HU_SRC_${sk})
     if(prev AND NOT prev STREQUAL "${tsets}")
@@ -415,7 +416,8 @@ function(_hu_finalize_run)
     endif()
     set_property(GLOBAL PROPERTY _HU_SRC_${sk} "${tsets}")
     # Source properties are per directory: apply them once per (directory of the target, source), so a source
-    # shared by targets in several directories gets them in each.
+    # shared by targets in several directories gets them in each (a second target of a directory gets the first one's,
+    # and the toolchain's macro does not run for it: GCC's map therefore holds the spellings of all the source's targets).
     get_target_property(tdir ${t} SOURCE_DIR)
     string(MD5 sdk "${tdir}|${src}")
     get_property(done GLOBAL PROPERTY _HU_SRCDIR_${sdk})
