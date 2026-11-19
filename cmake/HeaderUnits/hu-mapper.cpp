@@ -23,7 +23,7 @@
 //   <path> <cmi>       a header unit this one imports (HU_ALLOW_HEADER_IMPORTS)
 // Protocol: libcody (gcc/libcody/README.md): line-based blocks, " ;" continues a block, one response per request.
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-#define _CRT_SECURE_NO_WARNINGS   // (std::fopen: no C4996 with a project's /W4 /WX)
+#define _CRT_SECURE_NO_WARNINGS   // (fopen, _wfopen: no C4996 with a project's /W4 /WX)
 #endif
 #include <cctype>
 #include <cstdio>
@@ -35,6 +35,17 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>   // CommandLineToArgvW (shell32: a default library of MinGW, named below for the others)
+#if defined(_MSC_VER)
+#pragma comment(lib, "shell32")
+#endif
 #endif
 
 namespace {
@@ -100,17 +111,17 @@ bool read_line(std::string& line) {
   return c != EOF || !line.empty();
 }
 
-
-
 struct Maps {
   std::string root = ".", exported;
   std::set<std::string> textual;
   std::map<std::string, std::string> units;
 };
 
+FILE* uopen(const std::string& p, bool write);
+
 // One map file (see above); false if it cannot be opened.
 bool load(const std::string& path, Maps& m) {
-  FILE* f = std::fopen(path.c_str(), "rb");
+  FILE* f = uopen(path, false);
   if (!f) return false;
   std::string line;
   int c;
@@ -151,7 +162,7 @@ std::string fallback_name(std::string n) {
 // direction (and on Windows to case).
 std::string lookup(const std::string& index, const std::string& source) {
   std::string want = key(source);
-  FILE* f = std::fopen(index.c_str(), "rb");
+  FILE* f = uopen(index, false);
   if (!f) return "";
   std::string line, found;
   int c;
@@ -241,7 +252,8 @@ bool absolute_path(const std::string& s) {
 }
 
 
-// Paths in the request, the result and the cache are UTF-8 (CMake's encoding), also on Windows.
+// Paths in the request, the result, the cache, the maps, hu-index.txt and the arguments (see arguments()) are UTF-8
+// (CMake's encoding), also on Windows.
 fs::path upath(const std::string& p) { return fs::u8path(p); }
 
 // cmake_path(NORMAL_PATH): lexically normal, with forward slashes.
@@ -249,7 +261,11 @@ std::string normal(const std::string& p) { return upath(p).lexically_normal().ge
 
 FILE* uopen(const std::string& p, bool write) {
 #ifdef _WIN32
-  return _wfopen(upath(p).c_str(), write ? L"wb" : L"rb");
+  try {                 // (u8path throws on a string that is not UTF-8: no such file)
+    return _wfopen(upath(p).c_str(), write ? L"wb" : L"rb");
+  } catch (const std::exception&) {
+    return nullptr;
+  }
 #else
   return std::fopen(p.c_str(), write ? "wb" : "rb");
 #endif
@@ -385,9 +401,9 @@ std::string parent_dir(const std::string& p) {
   return s == std::string::npos ? std::string() : p.substr(0, s);
 }
 
-// <request> and <result>: ASCII paths (CMake passes them relative to the working directory).
+// <request> and <result>: CMake passes them relative to the working directory.
 int scan(const std::string& request, const std::string& result) {
-  FILE* in = std::fopen(request.c_str(), "rb");
+  FILE* in = uopen(request, false);
   if (!in) {
     std::fprintf(stderr, "hu-mapper: cannot open %s\n", request.c_str());
     return 2;
@@ -437,7 +453,7 @@ int scan(const std::string& request, const std::string& result) {
     out += pragmas;
   }
   if (changed && !cache_file.empty()) write_cache(cache_file, cache);
-  FILE* o = std::fopen(result.c_str(), "wb");
+  FILE* o = uopen(result, true);
   if (!o) {
     std::fprintf(stderr, "hu-mapper: cannot write %s\n", result.c_str());
     return 2;
@@ -445,6 +461,29 @@ int scan(const std::string& request, const std::string& result) {
   std::fputs(out.c_str(), o);
   std::fclose(o);
   return 0;
+}
+
+// The program's arguments in UTF-8.  On Windows, argv is in the ANSI code page, which cannot spell every path (and
+// spells the others in another encoding than hu-index.txt and the maps): the arguments come from the wide command
+// line instead, which CMake and GCC (whose programs have a UTF-8 manifest) pass right.
+std::vector<std::string> arguments(int argc, char** argv) {
+  std::vector<std::string> a;
+#ifdef _WIN32
+  int n = 0;
+  if (wchar_t** w = CommandLineToArgvW(GetCommandLineW(), &n)) {
+    for (int i = 0; i < n; ++i) {
+      int len = WideCharToMultiByte(CP_UTF8, 0, w[i], -1, nullptr, 0, nullptr, nullptr);
+      std::string s(len > 0 ? len : 1, '\0');
+      if (len > 0) WideCharToMultiByte(CP_UTF8, 0, w[i], -1, &s[0], len, nullptr, nullptr);
+      s.resize(s.size() - 1);   // (the terminating NUL)
+      a.push_back(s);
+    }
+    LocalFree(w);
+    return a;
+  }
+#endif
+  for (int i = 0; i < argc; ++i) a.push_back(argv[i]);
+  return a;
 }
 
 }  // namespace
@@ -456,26 +495,28 @@ int main(int argc, char** argv) {
 #endif
   Maps m;
   bool fallback = false;
-  std::string a1 = argc > 1 ? argv[1] : "";
-  if (argc == 2 && a1 == "-v") {
+  const std::vector<std::string> args = arguments(argc, argv);
+  const size_t n = args.size();
+  const std::string a1 = n > 1 ? args[1] : "";
+  if (n == 2 && a1 == "-v") {
     std::puts("hu-mapper 2");
     return 0;
   }
-  if (argc == 4 && a1 == "scan") return scan(argv[2], argv[3]);
-  if (argc == 2 && a1[0] != '-') {
-    if (!load(argv[1], m)) {
-      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[1]);
+  if (n == 4 && a1 == "scan") return scan(args[2], args[3]);
+  if (n == 2 && a1[0] != '-') {
+    if (!load(args[1], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", args[1].c_str());
       return 2;
     }
-  } else if (argc == 3 && a1 == "-s") {
+  } else if (n == 3 && a1 == "-s") {
     fallback = true;
-    if (!load(argv[2], m)) {
-      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[2]);
+    if (!load(args[2], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", args[2].c_str());
       return 2;
     }
-  } else if (argc == 5 && a1 == "-c") {
-    load(argv[2], m);                       // (CMake writes it before the compile; none: no named modules)
-    std::string hu = lookup(argv[3], argv[4]);
+  } else if (n == 5 && a1 == "-c") {
+    load(args[2], m);                       // (CMake writes it before the compile; none: no named modules)
+    std::string hu = lookup(args[3], args[4]);
     if (!hu.empty() && !load(hu, m)) {
       std::fprintf(stderr, "hu-mapper: cannot open %s\n", hu.c_str());
       return 2;
