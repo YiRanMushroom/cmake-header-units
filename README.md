@@ -265,10 +265,10 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
   answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
 * Without `hu-mapper` (cross-compiling without a host compiler, or `HU_GCC_WRAPPERS`), consumers use GCC's
-  `g++-mapper-server` through a script: `gcc-mapper.sh`, or on Windows `gcc-mapper.cmd` run through `cmd /c` (which finds
-  the source's map in `src-index.txt`; there a build directory or source path with `& | < > ^ % , ; =` is rejected at
-  configure time). Mapper files get short hashed names, because paths past 260 characters do not open, and `\n` line
-  ends, because GCC's mapper-file reader takes a `\r` as part of a word.
+  `g++-mapper-server` through a script: `gcc-mapper.sh`, or on Windows `gcc-mapper.cmd` run through `cmd /c` (there a
+  build directory or source path with `& | < > ^ % , ; =` is rejected at configure time). The script finds the source's
+  map in `hu-index.txt`, so the maps are the same shared ones. Mapper files get short hashed names, because paths past
+  260 characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
 **Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
 
