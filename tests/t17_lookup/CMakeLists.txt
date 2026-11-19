@@ -14,8 +14,13 @@ include(HeaderUnits)
 #   under #ifdef NDEBUG (in Debug the import is inactive and the header not found: it must be skipped);
 # - cur.h: found through CMAKE_INCLUDE_CURRENT_DIR (not a target property);
 # - the C++ library's directory given again with -I: the compiler keeps it as a system directory.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem ${CMAKE_CURRENT_SOURCE_DIR}/flagsys")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -isystem ${CMAKE_CURRENT_SOURCE_DIR}/relsys")
+if(MSVC)
+  set(t17_sys "/external:W0 /external:I ")     # cl's spelling of a system include directory
+else()
+  set(t17_sys "-isystem ")
+endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${t17_sys}${CMAKE_CURRENT_SOURCE_DIR}/flagsys")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${t17_sys}${CMAKE_CURRENT_SOURCE_DIR}/relsys")
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 add_library(t17_sys INTERFACE IMPORTED)

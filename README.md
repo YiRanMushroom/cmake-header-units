@@ -1,9 +1,10 @@
 # HeaderUnits.cmake
 
-C++20 **header units** with CMake for **GCC and Clang**, which CMake itself does not support yet. Add one module,
+C++20 **header units** with CMake for **GCC, Clang and MSVC**, which CMake itself does not support yet. Add one module,
 then write `import <vector>;`, `import <fmt/format.h>;` or `import "my/header.h";` instead of `#include` in your sources,
 for the standard library, third-party libraries and your own headers. The same CMakeLists.txt also works with
-**MSVC** and a Visual Studio generator: MSBuild builds header units natively, so the commands do nothing there.
+**MSVC** and a Visual Studio generator: MSBuild builds header units natively, so the commands do nothing there; with
+MSVC and Ninja the module builds them.
 
 Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 
@@ -14,10 +15,11 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 | Clang 22 (`clang++`, GNU-style driver) + MSVC STL (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Visual Studio 17 2022 | MSBuild (the commands do nothing) |
 | MinGW-w64 GCC 16.1 + libstdc++ (Windows) | Ninja | this module |
+| MSVC 19.44 (Windows) | Ninja | this module |
 
-MinGW-w64 GCC is so far tested with CMake 4.5.0 only (see Results).
+MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja with CMake 4.5.0 (see Results).
 
-Not supported: clang-cl, libc++, multi-config generators with GCC/Clang, MSVC with Ninja.
+Not supported: clang-cl, libc++, multi-config generators with GCC/Clang/MSVC-Ninja.
 
 ## Quick start
 
@@ -88,7 +90,8 @@ target_import_header_units(app hu_fmt SOURCES main.cpp)   # only main.cpp
 ```
 
 Requirements: GCC/Clang need CMake >= 4.2, the single-config **Ninja** generator and C++20 or later. MSVC needs CMake
->= 3.28 and a Visual Studio generator.
+>= 3.28 and a Visual Studio generator, or CMake >= 4.2, Ninja and MSVC 19.40 (Visual Studio 2022 17.10) or later, run
+from a developer prompt.
 
 ## Commands
 
@@ -172,7 +175,10 @@ target_import_header_units(<target> <set> [SOURCES <src>...])
 Gives the set's header units to all C++ sources of the target, or only to the listed ones.
 
 * The consumer's language settings must match the set's: C++ standard, extensions, exception and RTTI options,
-  `CMAKE_CXX_FLAGS`. This is checked at configure time.
+  `CMAKE_CXX_FLAGS`, and definitions that change the C++ library's ABI (`_GLIBCXX_DEBUG`, `_GLIBCXX_USE_CXX11_ABI`,
+  `_LIBCPP_ABI_*`; with the MSVC STL `_ITERATOR_DEBUG_LEVEL`, `_HAS_ITERATOR_DEBUGGING`, `_SECURE_SCL`,
+  `_HAS_EXCEPTIONS` and `MSVC_RUNTIME_LIBRARY`) from the target, its directory and its link interface. This is checked
+  at configure time.
 * A source used by several targets, in any directories, must get the same sets.
 
 ### HU_ALLOW_HEADER_IMPORTS (experimental)
@@ -269,12 +275,25 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * The response file keeps command lines short: CMake runs the dependency scan on Windows through cmd.exe, which
   allows at most 8191 characters.
 
-**MSVC** (`cmake/HeaderUnits/MSVC.cmake`):
+**MSVC with a Visual Studio generator** (`cmake/HeaderUnits/MSVC.cmake`):
 
-* With a Visual Studio generator, CMake marks C++20 sources for module scanning and MSBuild builds the header units of
-  their imports itself.
+* CMake marks C++20 sources for module scanning and MSBuild builds the header units of their imports itself.
 * The commands check their arguments, keep scanning on and otherwise do nothing.
-* MSVC with Ninja is rejected, because CMake does not support header units there.
+
+**MSVC with Ninja** (`cmake/HeaderUnits/MSVCNinja.cmake`):
+
+* A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
+  as the set's object file, so it is a real Ninja output.
+* Each consumer source gets `/headerUnit "<header>=<ifc>"` for its header units in a per-source response file.
+  `/translateInclude` is added to CMake's module-map option of the compile rule, not per source: CMake's dependency scan
+  gets the per-source options too, and `cl /scanDependencies` with `/translateInclude` recurses without end into a header
+  that includes itself through another one.
+* The header lookup assembles the include search list from the target's `/I` and `/external:I` directories, those in
+  `CMAKE_CXX_FLAGS` and the compile options, and the `INCLUDE` environment variable; `cl` cannot print it. The
+  self-check verifies it with `/showIncludes`.
+* An importer of a named module whose interface imports header units needs those header units too (`cl` looks them
+  up when it reads the module's IFC): the module's target gets them in its `INTERFACE_COMPILE_OPTIONS`, without
+  `/translateInclude`.
 
 **CMake internals relied upon** (unsupported; grep `CMAKE-INTERNAL` in `cmake/`):
 
@@ -286,6 +305,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
    known rule": a loud failure, never a silent misbuild.
 3. Observed Ninja-generator behaviour: per-source `COMPILE_OPTIONS` and `OBJECT_DEPENDS` also apply to the scan
    statement. The test driver re-checks this in build.ninja on every run.
+4. MSVC with Ninja: `/translateInclude` is appended to `CMAKE_CXX_MODULE_MAP_FLAG` (`@<MODULE_MAP_FILE>`), which only
+   CMake's scanned compile rule uses.
 
 ## Limitations
 
@@ -309,8 +330,12 @@ defined before the include take effect. Use it for the one source of an stb-styl
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
 * Clang itself marks header units experimental; the module silences `-Wexperimental-header-units`.
 * MSVC:
-  * MSBuild does not translate `#include` into imports in this setup;
-  * fmt 10.1.1 header-only does not link through an MSBuild header unit with MSVC 19.44 (see Tests).
+  * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
+  * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
+    (`format_facet<std::locale>::do_put` unresolved; see Tests);
+  * with Ninja, Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency
+    records (for every MSVC compile, not only header units): an update of Visual Studio or the Windows SDK does not
+    rebuild the header units of the C++ library. Delete the build directory after one.
 
 ## Repository layout
 
@@ -323,12 +348,14 @@ cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
-tests/t01..t16/                  test projects; tests/run_suite.cmake is the driver
+cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
+tests/t01..t21/                  test projects; tests/run_suite.cmake is the driver
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
 run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
+run-msvc-ninja.bat               run the suite with MSVC and Ninja
 docker/                          the Linux toolchain image used for development (GCC 16, Clang 22, fmt, json, Boost)
 docs/REPORT.md                   research report (in Chinese): CMake's position, compiler behaviour, prior art
 ```
@@ -352,7 +379,7 @@ Each test is a standalone CMake project with a one-line README:
 | t01_stl | `import <vector>/<string>/<iostream>` in a plain executable |
 | t02_thirdparty | fmt + nlohmann_json (+ Boost on Linux) + STL header units in one TU; overlapping sets; GCC build-order independence |
 | t03_named_modules | named modules with `export import <vector>`; cross-target importers, including CMake's synthesized BMI targets |
-| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, duplicate header) are rejected at configure time |
+| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, duplicate header) are rejected at configure time |
 | t05_rebuild | no-op build; touching or same-size edits of headers rebuild BMIs before consumers |
 | t06_mixed | header units and textual `#include` of overlapping headers in one TU, in every order; a TU excluded via `SOURCES` |
 | t07_own_headers | the project's own headers (in-tree library, local header) as header units; `#include` of them is translated |
@@ -399,12 +426,24 @@ How to run:
   ```
 
   `MINGW_CXX` defaults to `g++`; the results land in `_build/mingw-local/results.txt`.
+* Windows, clang++: `vcvars64.bat` puts Visual Studio's own, older Clang (19.1.5 with Visual Studio 2022 17.14) first on
+  PATH, which cannot build header units of the C++ library with Windows SDK 10.0.26100; `set CLANG_CXX=<path to
+  clang++.exe>` selects another.
 * Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest with a Visual Studio generator; t04 and t09 are
-  skipped.
+  skipped. `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
+  header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
+  for those headers; the IDE probe and t04's extensions variant do not apply.
 * Adversarial scenarios: `tests/attack/run-attack-linux.sh` and `tests/attack/run-attack-win.bat`; results are in
   `tests/attack/RESULTS.md`.
 
 ## Results
+
+**2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
+10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way
+(XFAIL; fmt does not link through a header unit, as with MSBuild). clang++ 22.1.8 + MSVC STL (`TC=win`): 21/21 PASS.
+MinGW-w64 GCC 16.1 (`TC=mingw`): 20 PASS, t02_thirdparty XFAIL; with CMake 4.3.1 t03_named_modules passes as well (its
+#28166 probe needs CMake 4.4). The Linux toolchains were not rerun for these changes. Configure time of a project with
+40 targets, 1000 sources and 70 header units (MinGW GCC): 42.5 s before the per-search-list maps, 7.6 s after.
 
 **2026-11-19, after the lookup rework and GCC's hu-mapper** (fresh build directories): t01-t21 **63/63 PASS** on GCC
 16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64 GCC 16.1
