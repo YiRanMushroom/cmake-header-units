@@ -253,7 +253,11 @@ defined before the include take effect. Use it for the one source of an stb-styl
 * `hu-mapper` (`cmake/HeaderUnits/hu-mapper.cpp`, C++17, no dependencies) is built once per build tree at configure
   time with the project's compiler (cross-compiling: a host compiler, see GCC below), rebuilt only when its source
   changes. It scans sources for import declarations and the `textual-includes` marker, resolves the
-  imported names against the search list, and keeps a scan cache; with GCC it is also the module mapper. It computes
+  imported names against the search list, and keeps a scan cache (a source it cannot read, e.g. locked by an editor or
+  a virus scanner on Windows, is reported and never cached; that run falls back to CMake's scan); with GCC it is also
+  the module mapper. On Windows it reads its arguments from the wide command line as UTF-8 and opens files with
+  `_wfopen`, so non-ASCII paths match `hu-index.txt` and the maps; it is linked by a relative path because MinGW's `ld`
+  uses the ANSI code page. It computes
   what the CMake functions `_hu_scan_imports`, `_hu_import_name` and `_hu_find_header` compute, which remain the
   fallback. On a project of 1000 sources in 20 targets with `target_auto_header_units`, a reconfigure took about 2 s
   with `hu-mapper`'s scan and 3-3.5 s with CMake's (MinGW GCC, clang++ and MSVC; the same build files either way).
@@ -372,6 +376,9 @@ scheme):
 * GCC:
   * one header unit per header per build tree;
   * no blanks in source paths or the build directory, and without `hu-mapper` none in header paths;
+  * on Windows (MinGW-w64), non-ASCII source and build directories work with `hu-mapper` (the default); without it
+    (`HU_GCC_WRAPPERS` ON), a build directory with a character outside the ANSI code page (e.g. 中) fails in GCC's own
+    module mapper;
   * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
     reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
     predates the header lookup without `try_compile` (same failure with the earlier code).
@@ -397,6 +404,8 @@ scheme):
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
     (`format_facet<std::locale>::do_put` unresolved; see Tests);
+  * with Ninja, a build directory with non-ASCII characters fails the configure's header-lookup self-check: cl prints
+    `/showIncludes` in the console code page (a character outside it becomes `?`). It works after `chcp 65001`;
   * with Ninja, Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency
     records (for every MSVC compile, not only header units). The header units depend on the compiler and on the
     `INCLUDE` environment variable instead (see How it works), so a changed `INCLUDE` takes effect at the next CMake
@@ -449,7 +458,7 @@ Each test is a standalone CMake project with a one-line README:
 
 | test | what it covers |
 |---|---|
-| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable |
+| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable; on Windows also a `target_auto_header_units` project in directories named `*-é中` (MSVC: `*-ascii`), first configured with its source locked: the lock is reported and not cached, and `hu-mapper` serves GCC from non-ASCII paths |
 | t02_thirdparty | fmt + nlohmann_json (+ Boost on Linux) + STL header units in one TU; overlapping sets; GCC build-order independence |
 | t03_named_modules | named modules with `export import <vector>`; cross-target importers, including CMake's synthesized BMI targets |
 | t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, a consumer directory's own `CMAKE_CXX_FLAGS_DEBUG`, duplicate header) are rejected at configure time; the flags and ABI cases also under Ninja Multi-Config, with the configuration named in the message (Debug only for `_ITERATOR_DEBUG_LEVEL=0` with the MSVC STL) |
@@ -518,8 +527,9 @@ How to run:
 * Windows, clang++ and clang-cl: `vcvars64.bat` puts Visual Studio's own, older Clang (19.1.5 with Visual Studio 2022
   17.14) first on PATH, which cannot build header units of the C++ library with Windows SDK 10.0.26100; `set
   CLANG_CXX=<path to clang++.exe or clang-cl.exe>` selects another.
-* Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest with a Visual Studio generator; t04 and t09 are
-  skipped. `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
+* Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest (the one next to `CMAKE_EXE`) with a Visual Studio
+  generator; t04 and t09 are skipped, and t02, t08 and t11 are XFAIL (fmt's `do_put`, see Limitations).
+  `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
   header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
   for those headers; the IDE probe and t04's extensions variant do not apply. t01 also checks that a CMake run without
   changes compiles nothing and that one with another `INCLUDE` rebuilds the header units and their consumer.
