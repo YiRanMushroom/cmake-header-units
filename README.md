@@ -290,9 +290,12 @@ defined before the include take effect. Use it for the one source of an stb-styl
   header). Debug information is the same either way (the wrapper only adds an include level, no code).
 * Each consumer source gets a map listing its header units, under every spelling the targets compiling it use (GCC
   names a header unit by the spelling of the include directory it found it in, e.g. `app/../inc`). GCC also translates
-  `#include`s of listed headers into imports. `hu-index.txt` (source to map, read by the compile's mapper) is removed at
+  `#include`s of listed headers into imports. `hu-index.txt` (one line per source and target that imports header units
+  for it, naming the target's object directory and the map; read by the compile's mapper) is removed at
   the start of every configure and rewritten at its end, so it describes exactly the current configure: with no
-  consumer left it is empty or missing, and every `#include` stays textual. Sources with the same content share one map (`gcc-m/<hash>.map`).
+  consumer left it is empty or missing, and every `#include` stays textual. Another target that compiles the same source
+  without importing header units finds no line for its object directory: its `#include`s stay textual and its build
+  needs no header unit. Sources with the same content share one map (`gcc-m/<hash>.map`).
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
   header-unit map together: GCC starts `hu-mapper -c <module map> <index> <source>`, which reads both and finds the
   source's map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. No shell or `cmd.exe` runs in
@@ -425,7 +428,7 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t25/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+tests/t01..t26/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
@@ -482,6 +485,7 @@ Each test is a standalone CMake project with a one-line README:
 | t23_multi_config | Ninja Multi-Config: Debug and Release build and run with their own header units (the header's value depends on `NDEBUG`), each a no-op after; a header edit rebuilds the BMI and its consumers in one `ninja` run; a deleted BMI is rebuilt; the consumer's depfile names its BMI; MSVC (and GCC with `HU_GCC_WRAPPERS`) is rejected at configure time with the reason |
 | t24_two_sets | one header in two sets of the same directory, each set imported by its own target (`<vector>`, and `<t24/val.h>`, which the second set spells `<val.h>`): GCC rejects the second set at configure time (one header unit per header per build tree); the other toolchains build four distinct BMIs, each consumer's compile gets only its own set's BMIs, and a deleted BMI is rebuilt alone with its consumer |
 | t25_shared_source | one source compiled by three targets that import the same set, each spelling the include directory differently (`a/../inc`; in one directory `b/../inc` and `b/../b/../inc`): every compile imports `<sh.h>` and translates `#include <sh2.h>` (GCC: checked in the depfiles) |
+| t26_shared_targets | one source compiled by a target that imports a set and, in another directory, by one that does not: a clean build of only the second builds no header unit and keeps the `#include` textual (depfile), also after an edit of the header |
 
 For each test, `tests/run_suite.cmake` runs:
 

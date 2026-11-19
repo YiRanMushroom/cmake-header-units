@@ -4,8 +4,9 @@
 //   hu-mapper -s <map>                     a consumer's dependency scan: <map> lists its header units; an unknown
 //                                          (named) module gets a fallback name, as the scan never reads it
 //   hu-mapper -c <modmap> <index> <source> a consumer's compile: CMake's module map of the TU (named modules) plus the
-//                                          header-unit map that <index> ("<source>|<map>" per line) gives <source>
-//                                          (Ninja's $in: CMake passes a compiled source by absolute path)
+//                                          header-unit map that <index> gives <source> (Ninja's $in: CMake passes a
+//                                          compiled source by absolute path) compiled by the target whose object
+//                                          directory holds <modmap>; see lookup()
 //   hu-mapper scan <request> <result>      configure time (Common.cmake, _hu_native_scan): the header-unit import
 //                                          declarations of sources and the files their names resolve to; see below
 //   hu-mapper -v                           prints the format version (configure checks that the program runs)
@@ -158,10 +159,25 @@ std::string fallback_name(std::string n) {
   return "gcm.cache/" + n + ".gcm";
 }
 
-// The header-unit map the index gives <source>, or "".  Both are absolute paths, compared without regard to slash
-// direction (and on Windows to case).
-std::string lookup(const std::string& index, const std::string& source) {
-  std::string want = key(source);
+// The header-unit map the index gives the compile of <source> whose module map is <modmap> (the object path plus
+// ".modmap"), or "".  Index line: "<objdir>|<target>|<source>|<map>", one per target that imports header units for the
+// source: it applies when <modmap> is in <objdir> (so the compile of the source by another target gets none), or when
+// the compile is one of a target CMake synthesizes to build a BMI of <target>'s module for an importer (Kitware #28166;
+// object directory ".../CMakeFiles/<target>@synth_<n>.dir").  Paths are compared without regard to slash direction
+// (and on Windows to case).
+std::string lookup(const std::string& index, const std::string& source, const std::string& modmap) {
+  const std::string want = key(source), mm = key(modmap);
+  std::string synth;                        // the target a synthesized compile builds a BMI for
+  size_t at = mm.find("@synth_");
+  if (at != std::string::npos) {
+    size_t b = mm.rfind('/', at), e = mm.find('/', at);
+    b = b == std::string::npos ? 0 : b + 1;
+    std::string comp = mm.substr(b, e == std::string::npos ? std::string::npos : e - b);
+    std::string parent = b >= 2 ? mm.substr(0, b - 1) : "";
+    parent = parent.substr(parent.rfind('/') == std::string::npos ? 0 : parent.rfind('/') + 1);
+    if (comp.size() > 4 && comp.compare(comp.size() - 4, 4, ".dir") == 0 && parent == key("CMakeFiles"))
+      synth = comp.substr(0, comp.find('@'));   // ("" for CMake's own, "@cmake_cxx_std@synth_0")
+  }
   FILE* f = uopen(index, false);
   if (!f) return "";
   std::string line, found;
@@ -170,10 +186,13 @@ std::string lookup(const std::string& index, const std::string& source) {
     line.clear();
     while ((c = std::fgetc(f)) != EOF && c != '\n')
       if (c != '\r') line += (char)c;
-    size_t bar = line.rfind('|');
-    if (bar != std::string::npos && key(line.substr(0, bar)) == want) {
-      found = line.substr(bar + 1);
-      break;
+    size_t b1 = line.find('|'), b2 = b1 == std::string::npos ? b1 : line.find('|', b1 + 1), b3 = line.rfind('|');
+    if (b2 != std::string::npos && b3 > b2 && key(line.substr(b2 + 1, b3 - b2 - 1)) == want) {
+      std::string dir = key(line.substr(0, b1)) + "/";
+      if (mm.compare(0, dir.size(), dir) == 0 || (!synth.empty() && key(line.substr(b1 + 1, b2 - b1 - 1)) == synth)) {
+        found = line.substr(b3 + 1);
+        break;
+      }
     }
     if (c == EOF) break;
   }
@@ -516,7 +535,7 @@ int main(int argc, char** argv) {
   const size_t n = args.size();
   const std::string a1 = n > 1 ? args[1] : "";
   if (n == 2 && a1 == "-v") {
-    std::puts("hu-mapper 2");
+    std::puts("hu-mapper 3");
     return 0;
   }
   if (n == 4 && a1 == "scan") return scan(args[2], args[3]);
@@ -533,7 +552,7 @@ int main(int argc, char** argv) {
     }
   } else if (n == 5 && a1 == "-c") {
     load(args[2], m);                       // (CMake writes it before the compile; none: no named modules)
-    std::string hu = lookup(args[3], args[4]);
+    std::string hu = lookup(args[3], args[4], args[2]);
     if (!hu.empty() && !load(hu, m)) {
       std::fprintf(stderr, "hu-mapper: cannot open %s\n", hu.c_str());
       return 2;
