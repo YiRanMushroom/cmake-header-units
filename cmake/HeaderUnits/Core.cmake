@@ -70,13 +70,14 @@ function(add_header_units set)
   set_target_properties(${set} PROPERTIES POSITION_INDEPENDENT_CODE ${pic})
 
   # Each header's file: the first match in the set's include search list, read from the set target as CMake will
-  # compile it (with what its directory adds: include_directories(), add_compile_options(), CMAKE_INCLUDE_CURRENT_DIR).
+  # compile it (with what its directory adds: include_directories(), add_compile_options(), CMAKE_INCLUDE_CURRENT_DIR),
+  # the same in every configuration.
   _hu_target_search(S ${set})
   set(search ${S_DIRS})
   set(paths)
   set(reals)
   foreach(h IN LISTS A_HEADERS)
-    _hu_find_header(p "${h}" ${search})
+    _hu_target_find(p S "${h}" "add_header_units(${set})")
     if(NOT p)
       string(JOIN "\n  " shown ${search})
       message(FATAL_ERROR "add_header_units(${set}): <${h}> is not found in the include search list of the set's flags "

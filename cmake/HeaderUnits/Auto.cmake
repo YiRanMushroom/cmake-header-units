@@ -90,10 +90,14 @@ function(_hu_auto_request cmd tgt)
   cmake_language(EVAL CODE "cmake_language(DEFER CALL _hu_auto_run ${i})")
 endfunction()
 
-# _hu_find_header for _hu_auto_run (a macro: it reads the native scan's results there, _hu_nc_<md5 of name>).
+# _hu_find_header for _hu_auto_run (a macro: it reads the native scan's results there, _hu_nc_<md5 of name>, and the
+# search lists S_*).  Configurations with search lists of their own (Ninja Multi-Config) must find the same file: the
+# native scan saw only the first list.
 macro(_hu_auto_find out name)
   string(MD5 _hu_afk "${name}")
-  if(DEFINED _hu_nc_${_hu_afk})
+  if(S_N GREATER 1)
+    _hu_target_find(${out} S "${name}" "${cmd}(${tgt})")
+  elseif(DEFINED _hu_nc_${_hu_afk})
     set(${out} "${_hu_nc_${_hu_afk}}")
   else()
     _hu_find_header(${out} "${name}" ${search})
@@ -101,8 +105,9 @@ macro(_hu_auto_find out name)
 endmacro()
 
 # Request <i>'s C++ sources (absolute; target_header_units_scan_sources(): the listed ones, checked) and the search list
-# of its target with the request's own additions, into the global properties _HU_AUTO_<i>_ALL and _HU_AUTO_<i>_SEARCH.
-# Runs in the request's directory.
+# of its target with the request's own additions, into the global properties _HU_AUTO_<i>_ALL and _HU_AUTO_<i>_SEARCH
+# (and every configuration's: _SEARCH_N, _SEARCH_<k>, _SEARCH_CFGS_<k>, see _hu_target_search).  Runs in the request's
+# directory.
 function(_hu_auto_inputs i)
   set(p _HU_AUTO_${i})
   get_property(cmd GLOBAL PROPERTY ${p}_CMD)
@@ -165,6 +170,12 @@ function(_hu_auto_inputs i)
   _hu_target_search(S ${tgt} ${ov} INCS ${A_INCLUDE_DIRECTORIES} LIBS ${A_LINK_LIBRARIES} OPTS ${A_COMPILE_OPTIONS})
   set_property(GLOBAL PROPERTY ${p}_ALL "${all}")
   set_property(GLOBAL PROPERTY ${p}_SEARCH "${S_DIRS}")
+  set_property(GLOBAL PROPERTY ${p}_SEARCH_N ${S_N})
+  math(EXPR last "${S_N} - 1")
+  foreach(k RANGE ${last})
+    set_property(GLOBAL PROPERTY ${p}_SEARCH_${k} "${S_DIRS_${k}}")
+    set_property(GLOBAL PROPERTY ${p}_SEARCH_CFGS_${k} "${S_CFGS_${k}}")
+  endforeach()
 endfunction()
 
 # The native scan (_hu_native_scan) of request <self> and of every request of directory <dir> not yet run (their
@@ -300,6 +311,12 @@ function(_hu_auto_run i)
       set(scanned FALSE)
     endif()
   endif()
+  get_property(S_N GLOBAL PROPERTY ${p}_SEARCH_N)
+  math(EXPR last "${S_N} - 1")
+  foreach(k RANGE ${last})
+    get_property(S_DIRS_${k} GLOBAL PROPERTY ${p}_SEARCH_${k})
+    get_property(S_CFGS_${k} GLOBAL PROPERTY ${p}_SEARCH_CFGS_${k})
+  endforeach()
   set(names)
   set(files)
   if(scanned)

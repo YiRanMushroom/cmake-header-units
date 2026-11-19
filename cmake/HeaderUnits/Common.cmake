@@ -33,33 +33,50 @@ function(_hu_dir_spellings raw_out norm_out d)
   set(${norm_out} "${n}" PARENT_SCOPE)
 endfunction()
 
-# The search list for one set of options, with the markers: CMake's compile rule is "$DEFINES $INCLUDES $FLAGS", so
-# a target's -I / -isystem directories come before CMAKE_CXX_FLAGS (and the build type's), sysroot / target /
-# external toolchain, the language level (some options are refused without it, e.g. GCC's -freflection without
-# -std=c++26) and the target's COMPILE_OPTIONS.  Options that cannot change the search list (warnings, -D/-U, -O, -g)
-# are left out, so targets that differ only in those share the run.  A list printed with a non-zero exit code is used
-# (the list comes before the compiler looks at the source; the real compile reports a bad option anyway).
-# Outputs <p>_LIST (normalized directories; the markers as @I and @S, with clang-cl also @B) and <p>_RAW (the
-# compiler's spelling).
+# The options among ARGN that can change the search list: not warnings, -D/-U, -O, -g (nor clang-cl's /W, /D, /U, /O).
+function(_hu_search_opts out)
+  set(r)
+  foreach(x IN LISTS ARGN)
+    if((x MATCHES "^-(W|D|U|O|pedantic|fdiagnostics)" AND NOT x MATCHES "^-W[apl],")
+       OR x MATCHES "^-g([0-3]|gdb[0-3]?|dwarf.*|split-dwarf|line-tables-only|column-info|z.*)?$"
+       OR (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND x MATCHES "^/(W|D|U|O)"))
+      continue()               # (not -gcc-toolchain: Clang's single-dash form selects directories)
+    endif()
+    list(APPEND r "${x}")
+  endforeach()
+  set(${out} "${r}" PARENT_SCOPE)
+endfunction()
+
+# The search list for one set of options in configuration CFG ("" for none), with the markers: CMake's compile rule is
+# "$DEFINES $INCLUDES $FLAGS", so a target's -I / -isystem directories come before CMAKE_CXX_FLAGS and
+# CMAKE_CXX_FLAGS_<CFG>, sysroot / target / external toolchain, the language level (some options are refused without
+# it, e.g. GCC's -freflection without -std=c++26) and the target's COMPILE_OPTIONS.  Options that cannot change the
+# search list are left out of the configuration's flags and of the options (_hu_search_opts), so configurations and
+# targets that differ only in those share the run (CMake's default flags of the configurations differ only in those).
+# A list printed with a non-zero exit code is used (the list comes before the compiler looks at the source; the real
+# compile reports a bad option anyway).  Outputs <p>_LIST (normalized directories; the markers as @I and @S, with
+# clang-cl also @B) and <p>_RAW (the compiler's spelling).
 function(_hu_search_base p)
-  cmake_parse_arguments(PARSE_ARGV 1 A "" "DIR;STD;EXT" "OPTS")
+  cmake_parse_arguments(PARSE_ARGV 1 A "" "DIR;CFG;STD;EXT" "OPTS")
   get_property(hudir GLOBAL PROPERTY _HU_DIR)
   set(mI "${hudir}/probe/mI")
   set(mS "${hudir}/probe/mS")
   set(mB "${hudir}/probe/mB")
-  # CMAKE_CXX_FLAGS and the build type's, as the directory sees them
+  # CMAKE_CXX_FLAGS and the configuration's, as the directory sees them
   _hu_dirvar(fl "${A_DIR}" CMAKE_CXX_FLAGS)
   separate_arguments(flags NATIVE_COMMAND "${fl}")
-  if(CMAKE_BUILD_TYPE)
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" cfg)
+  if(A_CFG)
+    string(TOUPPER "${A_CFG}" cfg)
     _hu_dirvar(fl "${A_DIR}" CMAKE_CXX_FLAGS_${cfg})
     separate_arguments(f NATIVE_COMMAND "${fl}")
+    _hu_search_opts(f ${f})
     list(APPEND flags ${f})
   endif()
   get_property(scset GLOBAL PROPERTY _HU_SC_SET)
   if(NOT scset)              # the self-check uses the options of the first lookup
     set_property(GLOBAL PROPERTY _HU_SC_SET ON)
     set_property(GLOBAL PROPERTY _HU_SC_DIR "${A_DIR}")
+    set_property(GLOBAL PROPERTY _HU_SC_CFG "${A_CFG}")
     set_property(GLOBAL PROPERTY _HU_SC_STD "${A_STD}")
     set_property(GLOBAL PROPERTY _HU_SC_EXT "${A_EXT}")
     set_property(GLOBAL PROPERTY _HU_SC_OPTS "${A_OPTS}")
@@ -68,7 +85,7 @@ function(_hu_search_base p)
     # cl prints no search list (no -E -v): it searches the directories of its command line in order, then those of
     # the INCLUDE environment variable, which Ninja passes on from the configure's environment (a developer prompt).
     # CMake's command line is "$INCLUDES $FLAGS": the target's /I and /external:I (SYSTEM) directories, then any in
-    # CMAKE_CXX_FLAGS (and the build type's) and the compile options.  Assembled here, without a compiler run; the
+    # CMAKE_CXX_FLAGS (and the configuration's) and the compile options.  Assembled here, without a compiler run; the
     # self-check verifies it.
     set(list "@I" "@S")
     set(raws "${mI}" "${mS}")
@@ -145,14 +162,8 @@ function(_hu_search_base p)
     else()
       set(so "${o}")
     endif()
-    foreach(x IN LISTS so)
-      if((x MATCHES "^-(W|D|U|O|pedantic|fdiagnostics)" AND NOT x MATCHES "^-W[apl],")
-         OR x MATCHES "^-g([0-3]|gdb[0-3]?|dwarf.*|split-dwarf|line-tables-only|column-info|z.*)?$"
-         OR (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND x MATCHES "^/(W|D|U|O)"))
-        continue()             # (not -gcc-toolchain: Clang's single-dash form selects directories)
-      endif()
-      list(APPEND args "${x}")
-    endforeach()
+    _hu_search_opts(so ${so})
+    list(APPEND args ${so})
   endforeach()
   string(MD5 k "${args}")
   get_property(have GLOBAL PROPERTY _HU_BASE_${k}_LIST SET)
@@ -221,8 +232,8 @@ endfunction()
 # path); a -I directory that is also a system directory is dropped from the -I part.  Outputs <p>_DIRS (normalized) and
 # <p>_RAW (as spelled: the given directory, or the compiler's; GCC names a header by it, _hu_gcc_keys).
 function(_hu_search_list p)
-  cmake_parse_arguments(PARSE_ARGV 1 A "" "DIR;STD;EXT" "INCS;SYSINCS;OPTS")
-  _hu_search_base(B DIR "${A_DIR}" STD "${A_STD}" EXT "${A_EXT}" OPTS ${A_OPTS})
+  cmake_parse_arguments(PARSE_ARGV 1 A "" "DIR;CFG;STD;EXT" "INCS;SYSINCS;OPTS")
+  _hu_search_base(B DIR "${A_DIR}" CFG "${A_CFG}" STD "${A_STD}" EXT "${A_EXT}" OPTS ${A_OPTS})
   list(FIND B_LIST "@B" sat)   # where the system directories start: clang-cl's @B, else @S
   if(sat LESS 0)
     list(FIND B_LIST "@S" sat)
@@ -339,8 +350,11 @@ endfunction()
 # requirements of LINK_LIBRARIES (_hu_collect_usage: -I or -isystem), COMPILE_OPTIONS and the language level
 # (_hu_target_std).  Extra INCS / LIBS / OPTS and STD / EXT overrides
 # come from target_auto_header_units().  Generator expressions are skipped (BUILD_INTERFACE unwrapped); a directory
-# given with target_include_directories(SYSTEM PRIVATE) is not distinguishable here and counts as -I.  Outputs
-# <p>_DIRS / <p>_RAW (_hu_search_list).
+# given with target_include_directories(SYSTEM PRIVATE) is not distinguishable here and counts as -I.  A list per
+# configuration that is built (_hu_configs; configurations whose flags give the compiler the same list share one, so
+# only Ninja Multi-Config with include directories in a CMAKE_CXX_FLAGS_<CONFIG> has more than one): outputs <p>_N, and
+# for each k from 0 <p>_DIRS_<k> / <p>_RAW_<k> (_hu_search_list) and its configurations <p>_CFGS_<k>; the first list
+# also as <p>_DIRS / <p>_RAW.  A header is looked up in all of them with _hu_target_find.
 function(_hu_target_search p tgt)
   cmake_parse_arguments(PARSE_ARGV 2 A "" "STD;EXT" "INCS;LIBS;OPTS")
   get_target_property(sdir ${tgt} SOURCE_DIR)
@@ -384,9 +398,43 @@ function(_hu_target_search p tgt)
   if(DEFINED A_EXT)
     _hu_bool(ext "${A_EXT}")
   endif()
-  _hu_search_list(S DIR "${sdir}" STD "${std}" EXT "${ext}" INCS ${incs} ${U_INCS} SYSINCS ${U_SYSINCS} OPTS ${opts})
-  set(${p}_DIRS "${S_DIRS}" PARENT_SCOPE)
-  set(${p}_RAW "${S_RAW}" PARENT_SCOPE)
+  _hu_configs(cfgs)
+  list(LENGTH cfgs nc)
+  if(nc EQUAL 0)
+    set(nc 1)
+  endif()
+  math(EXPR last "${nc} - 1")
+  set(n 0)
+  set(bks)
+  foreach(i RANGE ${last})
+    set(cfg "")
+    if(cfgs)
+      list(GET cfgs ${i} cfg)
+    endif()
+    _hu_search_base(B DIR "${sdir}" CFG "${cfg}" STD "${std}" EXT "${ext}" OPTS ${opts})
+    string(MD5 bk "${B_LIST}|${B_RAW}")
+    list(FIND bks ${bk} k)
+    if(k LESS 0)
+      set(k ${n})
+      math(EXPR n "${n} + 1")
+      list(APPEND bks ${bk})
+      set(cfgs_${k})
+      _hu_search_list(S DIR "${sdir}" CFG "${cfg}" STD "${std}" EXT "${ext}" INCS ${incs} ${U_INCS} SYSINCS ${U_SYSINCS}
+                      OPTS ${opts})
+      set(${p}_DIRS_${k} "${S_DIRS}" PARENT_SCOPE)
+      set(${p}_RAW_${k} "${S_RAW}" PARENT_SCOPE)
+      if(k EQUAL 0)
+        set(${p}_DIRS "${S_DIRS}" PARENT_SCOPE)
+        set(${p}_RAW "${S_RAW}" PARENT_SCOPE)
+      endif()
+    endif()
+    list(APPEND cfgs_${k} "${cfg}")
+  endforeach()
+  set(${p}_N ${n} PARENT_SCOPE)
+  math(EXPR last "${n} - 1")
+  foreach(k RANGE ${last})
+    set(${p}_CFGS_${k} "${cfgs_${k}}" PARENT_SCOPE)
+  endforeach()
 endfunction()
 
 # Self-check, once per configure (one compiler run on a 3-line file, with the options of the first real lookup): the
@@ -402,7 +450,7 @@ function(_hu_self_check)
   endif()
   get_property(hudir GLOBAL PROPERTY _HU_DIR)
   get_property(tc GLOBAL PROPERTY _HU_TC)
-  foreach(v DIR STD EXT OPTS)
+  foreach(v DIR CFG STD EXT OPTS)
     get_property(sc_${v} GLOBAL PROPERTY _HU_SC_${v})
   endforeach()
   set(sc "${hudir}/probe/sc")
@@ -416,7 +464,8 @@ function(_hu_self_check)
   set(names hu_sc_shadow.h hu_sc_sys.h cstddef)
   set(inc "${sc}/sub/../inc")
   set(sys "${sc}/sys")
-  _hu_search_list(P DIR "${sc_DIR}" STD "${sc_STD}" EXT "${sc_EXT}" INCS "${inc}" SYSINCS "${sys}" OPTS ${sc_OPTS})
+  _hu_search_list(P DIR "${sc_DIR}" CFG "${sc_CFG}" STD "${sc_STD}" EXT "${sc_EXT}" INCS "${inc}" SYSINCS "${sys}"
+                  OPTS ${sc_OPTS})
   set(args)
   foreach(a IN LISTS P_ARGS)
     if(a STREQUAL "${hudir}/probe/mI")
@@ -561,6 +610,46 @@ function(_hu_find_header out name)
     cmake_path(NORMAL_PATH r)
   endif()
   set(${out} "${r}" PARENT_SCOPE)
+endfunction()
+
+# <name> in every search list of the _hu_target_search() result <p> (one per configuration, or group of configurations,
+# in the caller's variables): the file found ("" if none), when all find the same file (by real path), not finding it
+# included.  Otherwise the configure stops, the message starting with <what>: a header unit is compiled from one file
+# for all configurations.
+function(_hu_target_find out p name what)
+  set(fks)
+  math(EXPR last "${${p}_N} - 1")
+  foreach(k RANGE ${last})
+    _hu_find_header(f "${name}" ${${p}_DIRS_${k}})
+    set(rf "")
+    if(f)
+      file(REAL_PATH "${f}" rf)
+    endif()
+    string(MD5 fk "${rf}")
+    if(NOT fk IN_LIST fks)
+      list(APPEND fks ${fk})
+      set(f_${fk} "${f}")
+      set(cfgs_${fk})
+    endif()
+    list(APPEND cfgs_${fk} ${${p}_CFGS_${k}})
+  endforeach()
+  list(LENGTH fks n)
+  if(n GREATER 1)
+    set(why "")
+    foreach(fk IN LISTS fks)
+      _hu_cfg_label(in "${cfgs_${fk}}")
+      if(f_${fk})
+        string(APPEND why "\n  ${in}'${f_${fk}}'")
+      else()
+        string(APPEND why "\n  ${in}not found")
+      endif()
+    endforeach()
+    message(FATAL_ERROR "${what}: <${name}> is another file in another configuration (their flags, "
+      "CMAKE_CXX_FLAGS_<CONFIG>, add include directories):${why}\nA header unit is compiled from one file for all "
+      "configurations: let every configuration find the same file.")
+  endif()
+  list(GET fks 0 fk)
+  set(${out} "${f_${fk}}" PARENT_SCOPE)
 endfunction()
 
 # Header unit lookup by import name (angle name, or absolute path for a quote import found next to the importer),
@@ -813,7 +902,12 @@ endfunction()
 
 function(_hu_check_same_files consumer)
   _hu_target_search(C ${consumer})
-  string(MD5 ck "${C_DIRS}|${ARGN}")       # the same search list and sets: the same answer
+  set(lists "")
+  math(EXPR last "${C_N} - 1")
+  foreach(k RANGE ${last})
+    string(APPEND lists "${C_CFGS_${k}}|${C_DIRS_${k}}|")
+  endforeach()
+  string(MD5 ck "${lists}${ARGN}")        # the same search lists and sets: the same answer
   get_property(have GLOBAL PROPERTY _HU_SAMEFILES_${ck} SET)
   if(have)
     get_property(why GLOBAL PROPERTY _HU_SAMEFILES_${ck})
@@ -836,15 +930,22 @@ function(_hu_check_same_files consumer)
     endforeach()
   endforeach()
   set(why "")
-  foreach(h p s IN ZIP_LISTS hl pl sl)
-    _hu_find_header(f "${h}" ${C_DIRS})
-    if(NOT f)
-      continue()
+  foreach(k RANGE ${last})
+    set(in "")
+    if(C_N GREATER 1)            # (configurations with search lists of their own, Ninja Multi-Config)
+      _hu_cfg_label(in "${C_CFGS_${k}}")
     endif()
-    file(REAL_PATH "${f}" rf)
-    if(NOT rf IN_LIST covered)
-      string(APPEND why "\n  <${h}>: its include path finds '${f}', which has no header unit; set '${s}' has <${h}> as '${p}'")
-    endif()
+    foreach(h p s IN ZIP_LISTS hl pl sl)
+      _hu_find_header(f "${h}" ${C_DIRS_${k}})
+      if(NOT f)
+        continue()
+      endif()
+      file(REAL_PATH "${f}" rf)
+      if(NOT rf IN_LIST covered)
+        string(APPEND why "\n  ${in}<${h}>: its include path finds '${f}', which has no header unit; set '${s}' has <${h}> as "
+                          "'${p}'")
+      endif()
+    endforeach()
   endforeach()
   set_property(GLOBAL PROPERTY _HU_SAMEFILES_${ck} "${why}")
   _hu_same_files_warn("${consumer}" "${why}")

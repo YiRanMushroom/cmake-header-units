@@ -169,7 +169,11 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
   targets; configure prints it. Nothing is compiled at configure time. A configure-time self-check (one more run, with
   the options of the first lookup) stops the configure if the compiler finds or names headers otherwise than this
   predicts; if its probe cannot run, it only warns. A header found only through a directory given as an unevaluable
-  generator expression is not found: pass that directory with `INCLUDE_DIRECTORIES`.
+  generator expression is not found: pass that directory with `INCLUDE_DIRECTORIES`. With Ninja Multi-Config the
+  header is looked up with each configuration's flags (`CMAKE_CXX_FLAGS_<CONFIG>`; configurations whose flags differ
+  only in warnings, `-D`/`-U`, `-O` and `-g`, as CMake's defaults do, share the run): a header unit is compiled from
+  one file for all configurations, so a header that another configuration finds as another file (or not at all), e.g.
+  through an include directory in `CMAKE_CXX_FLAGS_RELEASE`, stops the configure with both files named.
 * `LINK_LIBRARIES` supplies include directories and definitions, from imported or in-tree targets. In-tree link
   interfaces are followed recursively: ALIAS targets are resolved, private (`$<LINK_ONLY:>`) dependencies are not
   followed.
@@ -372,8 +376,8 @@ scheme):
 * This is a prototype. Kitware considers DIY header units unsupported; CMake issue #25293 tracks native support.
 * GCC/Clang:
   * Ninja and Ninja Multi-Config only. With Ninja Multi-Config: GCC needs `hu-mapper` (no `HU_GCC_WRAPPERS`),
-    `HU_ALLOW_HEADER_IMPORTS` is rejected, and the header lookup uses the flags common to all configurations
-    (`CMAKE_CXX_FLAGS`, not `CMAKE_CXX_FLAGS_<CONFIG>`);
+    `HU_ALLOW_HEADER_IMPORTS` is rejected, and a header must be the same file in every configuration (an include
+    directory in one configuration's `CMAKE_CXX_FLAGS_<CONFIG>` that shadows it stops the configure);
   * header-unit sets cannot be installed or exported;
   * BMIs cannot be moved to another location.
 * GCC:
@@ -486,7 +490,7 @@ Each test is a standalone CMake project with a one-line README:
 | t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
 | t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler), and with its headers in a directory with a space (with `HU_GCC_WRAPPERS` a configure error) |
 | t22_import_std | `import std;` (CMake's `CMAKE_CXX_MODULE_STD`) in the same TUs as a header unit whose header includes `<string>`: one TU imports both, another `#include`s the header next to `import std;`. Needs CMake 4.5 (SKIP before: `import std` is experimental there); with Clang in the Linux image the driver names GCC's `libstdc++.modules.json` |
-| t23_multi_config | Ninja Multi-Config: Debug and Release build and run with their own header units (the header's value depends on `NDEBUG`), each a no-op after; a header edit rebuilds the BMI and its consumers in one `ninja` run; a deleted BMI is rebuilt; the consumer's depfile names its BMI; MSVC (and GCC with `HU_GCC_WRAPPERS`) is rejected at configure time with the reason |
+| t23_multi_config | Ninja Multi-Config: Debug and Release build and run with their own header units (the header's value depends on `NDEBUG`), each a no-op after; a header edit rebuilds the BMI and its consumers in one `ninja` run; a deleted BMI is rebuilt; the consumer's depfile names its BMI; the lookup uses each configuration's flags: an include directory in `CMAKE_CXX_FLAGS_RELEASE` whose `cfgval.h` loses on order is accepted (Debug and RelWithDebInfo share a compiler run), one whose `<vector>` shadows the C++ library's stops the configure naming the configurations and both files; MSVC (and GCC with `HU_GCC_WRAPPERS`) is rejected at configure time with the reason |
 | t24_two_sets | one header in two sets of the same directory, each set imported by its own target (`<vector>`, and `<t24/val.h>`, which the second set spells `<val.h>`): GCC rejects the second set at configure time (one header unit per header per build tree); the other toolchains build four distinct BMIs, each consumer's compile gets only its own set's BMIs, and a deleted BMI is rebuilt alone with its consumer |
 | t25_shared_source | one source compiled by three targets that import the same set, each spelling the include directory differently (`a/../inc`; in one directory `b/../inc` and `b/../b/../inc`): every compile imports `<sh.h>` and translates `#include <sh2.h>` (GCC: checked in the depfiles) |
 | t26_shared_targets | one source compiled by a target that imports a set and, in another directory, by one that does not: a clean build of only the second builds no header unit and keeps the `#include` textual (depfile), also after an edit of the header |
