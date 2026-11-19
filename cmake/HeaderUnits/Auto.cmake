@@ -316,6 +316,10 @@ function(_hu_auto_run i)
     endwhile()
     add_header_units(${sn} HEADERS ${fresh} LINK_LIBRARIES ${libs} INCLUDE_DIRECTORIES ${incs}
                      COMPILE_DEFINITIONS ${defs} COMPILE_OPTIONS ${opts} ${stdargs})
+    get_target_property(rt ${tgt} MSVC_RUNTIME_LIBRARY)   # (part of the MSVC ABI check)
+    if(rt)
+      set_target_properties(${sn} PROPERTIES MSVC_RUNTIME_LIBRARY "${rt}")
+    endif()
     # The set looks its headers up from its own target: it must find the files this target finds.
     get_property(sps GLOBAL PROPERTY _HU_SET_${sn}_PATHS)
     foreach(n p IN ZIP_LISTS fresh sps)

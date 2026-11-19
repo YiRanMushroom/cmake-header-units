@@ -18,6 +18,10 @@ include_guard(GLOBAL)
 if(_HU_DIR MATCHES "[ \t]")
   message(FATAL_ERROR "HeaderUnits: with GCC the build directory must not contain spaces (GCC's module-mapper file parser cannot handle them).")
 endif()
+if(CMAKE_HOST_WIN32 AND _HU_DIR MATCHES "[&|<>^%,;=]")
+  message(FATAL_ERROR "HeaderUnits: with GCC on Windows the build directory must not contain any of & | < > ^ % , ; = "
+    "(the module mapper runs through cmd.exe, which splits or interprets them).")
+endif()
 
 execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-prog-name=g++-mapper-server
                 OUTPUT_VARIABLE _hu_srv OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -348,6 +352,10 @@ endmacro()
 macro(_hu_GCC_consumer_options)
     if(src MATCHES "[ \t]")
       message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains a space; GCC's mapper cannot express it.")
+    endif()
+    if(CMAKE_HOST_WIN32 AND src MATCHES "[&|<>^%,;=]")
+      message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains one of & | < > ^ % , ; =; with GCC "
+        "on Windows the module mapper runs through cmd.exe, which splits or interprets them.")
     endif()
     get_property(srv GLOBAL PROPERTY _HU_GCC_SERVER)
     # Keys by the consumer's own search list: which directory (and so which spelling) GCC uses is the consumer's.
