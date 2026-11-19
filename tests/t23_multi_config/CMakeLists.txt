@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.28...4.5)
 project(t23_multi_config LANGUAGES CXX)
 # Ninja Multi-Config: a BMI per configuration, each built with that configuration's flags (NDEBUG in Release).
 set(CMAKE_CXX_STANDARD 20)
+# A Release-only include directory (CMAKE_CXX_FLAGS_RELEASE comes after the target's -I): its cfgval.h is never the one
+# found, so the configurations agree.  T23_SHADOW: one whose <vector> shadows the C++ library's in Release only.
+string(APPEND CMAKE_CXX_FLAGS_RELEASE " -I${CMAKE_CURRENT_SOURCE_DIR}/relinc")
+if(T23_SHADOW)
+  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -I${CMAKE_CURRENT_SOURCE_DIR}/relshadow")
+endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
 include(HeaderUnits)
 
