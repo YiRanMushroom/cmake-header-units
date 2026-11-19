@@ -507,6 +507,15 @@ How to run:
 
 ## Results
 
+**2026-11-19, the full matrix after native scanning, clang-cl, libc++, the MSVC toolchain stamp, GCC header paths with
+blanks, `import std` (t22) and Ninja Multi-Config (t23)** (fresh build directories, `tests/run_parallel.cmake`, every
+toolchain at the same time): Linux (the image of `docker/`) with CMake 4.5.0: GCC 16.2, Clang 22 + libstdc++ and
+Clang 22 + libc++ **23/23 PASS** each; with CMake 4.4.5: 22 PASS + t22 SKIP each. Windows 11 with CMake 4.5.0: clang++
+22.1.8 and clang-cl 22.1.8 (MSVC 19.44 STL) **23/23 PASS** each; MinGW-w64 GCC 16.1: 22 PASS + t02 XFAIL; MSVC 19.44
+with Ninja: 20 PASS + t02, t08, t11 XFAIL (fmt's `do_put`, see Limitations); t23 checks there that Ninja Multi-Config
+is rejected. With the parallel runner the Linux matrix (both CMake versions) took about 2 minutes, the Windows one
+about 5.5 minutes.
+
 **2026-11-19, Linux, CMake 4.4.5 and 4.5.0** (the image of `docker/`, fresh build directories, `run-linux.sh`): t01-t21
 **63/63 PASS** with each CMake version, on GCC 16.2, Clang 22 + libstdc++ 16 and Clang 22 + libc++ 22 (`TC=libcxx`,
 new). The module needed no change for libc++. Before the tests used fmt header-only with libc++, the three tests that

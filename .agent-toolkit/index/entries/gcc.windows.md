@@ -1,8 +1,7 @@
 +++
 title = "GCC on Windows (MinGW-w64): how header units are mapped without a POSIX shell, and why"
 keys = [ "crlf", "gcc", "mapper", "max_path", "mingw", "windows" ]
-updated = "2026-11-19 05:40:00"
-checked = "2026-11-19"
+updated = "2026-11-19 06:06:57"
 
 [[links]]
 path = "cmake/HeaderUnits/GCC.cmake"
@@ -13,12 +12,12 @@ path = "cmake/HeaderUnits/GCC.cmake"
 snippet = "file(TO_NATIVE_PATH \"${_HU_DIR}/hu-index.txt\" _hu_index_native)"
 
 [[links]]
-path = "cmake/HeaderUnits/GCC.cmake"
-snippet = "file(CONFIGURE OUTPUT \"${smap}\" CONTENT \"$root .\\n${content}\" NEWLINE_STYLE UNIX)"
+path = "cmake/HeaderUnits/Common.cmake"
+snippet = "list(APPEND tail -static)"
 
 [[links]]
 path = "cmake/HeaderUnits/GCC.cmake"
-snippet = "list(APPEND _hu_mflags -static)"
+snippet = "_hu_write(\"${smap}\" \"$root .\\n${content}\" UNIX)"
 +++
 With hu-mapper (the normal case) consumers need no script (gcc.wrapper), so paths may hold , ; = etc. Without it: Ninja on Windows starts commands with CreateProcess (no /bin/sh), so the consumer mapper is a generated gcc-mapper.cmd run as "-fmodule-mapper=|cmd /c <dir>/gcc-mapper.cmd $out.modmap $in" (double quotes: GCC splits the mapper argument itself; forward slashes, as libiberty's splitter eats backslashes; $out.modmap because CMake spells <MODULE_MAP_FILE> with backslashes there). Found the hard way:
 - Every mapper file must be written NEWLINE_STYLE UNIX: GCC's mapper-file reader keeps the \r of CRLF as part of the CMI path, and every header unit then fails with "unknown compiled module interface: no such module".
