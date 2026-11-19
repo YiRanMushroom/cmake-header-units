@@ -4,8 +4,9 @@
 //   hu-mapper -s <map>                     a consumer's dependency scan: <map> lists its header units; an unknown
 //                                          (named) module gets a fallback name, as the scan never reads it
 //   hu-mapper -c <modmap> <index> <source> a consumer's compile: CMake's module map of the TU (named modules) plus the
-//                                          header-unit map that <index> ("<source>|<map>" per line) gives <source>
-//                                          (Ninja's $in: CMake passes a compiled source by absolute path)
+//                                          header-unit map that <index> gives <source> (Ninja's $in: CMake passes a
+//                                          compiled source by absolute path) compiled by the target whose object
+//                                          directory holds <modmap>; see lookup()
 //   hu-mapper scan <request> <result>      configure time (Common.cmake, _hu_native_scan): the header-unit import
 //                                          declarations of sources and the files their names resolve to; see below
 //   hu-mapper -v                           prints the format version (configure checks that the program runs)
@@ -23,7 +24,7 @@
 //   <path> <cmi>       a header unit this one imports (HU_ALLOW_HEADER_IMPORTS)
 // Protocol: libcody (gcc/libcody/README.md): line-based blocks, " ;" continues a block, one response per request.
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
-#define _CRT_SECURE_NO_WARNINGS   // (std::fopen: no C4996 with a project's /W4 /WX)
+#define _CRT_SECURE_NO_WARNINGS   // (fopen, _wfopen: no C4996 with a project's /W4 /WX)
 #endif
 #include <cctype>
 #include <cstdio>
@@ -35,6 +36,17 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>   // CommandLineToArgvW (shell32: a default library of MinGW, named below for the others)
+#if defined(_MSC_VER)
+#pragma comment(lib, "shell32")
+#endif
 #endif
 
 namespace {
@@ -100,17 +112,17 @@ bool read_line(std::string& line) {
   return c != EOF || !line.empty();
 }
 
-
-
 struct Maps {
   std::string root = ".", exported;
   std::set<std::string> textual;
   std::map<std::string, std::string> units;
 };
 
+FILE* uopen(const std::string& p, bool write);
+
 // One map file (see above); false if it cannot be opened.
 bool load(const std::string& path, Maps& m) {
-  FILE* f = std::fopen(path.c_str(), "rb");
+  FILE* f = uopen(path, false);
   if (!f) return false;
   std::string line;
   int c;
@@ -147,11 +159,26 @@ std::string fallback_name(std::string n) {
   return "gcm.cache/" + n + ".gcm";
 }
 
-// The header-unit map the index gives <source>, or "".  Both are absolute paths, compared without regard to slash
-// direction (and on Windows to case).
-std::string lookup(const std::string& index, const std::string& source) {
-  std::string want = key(source);
-  FILE* f = std::fopen(index.c_str(), "rb");
+// The header-unit map the index gives the compile of <source> whose module map is <modmap> (the object path plus
+// ".modmap"), or "".  Index line: "<objdir>|<target>|<source>|<map>", one per target that imports header units for the
+// source: it applies when <modmap> is in <objdir> (so the compile of the source by another target gets none), or when
+// the compile is one of a target CMake synthesizes to build a BMI of <target>'s module for an importer (Kitware #28166;
+// object directory ".../CMakeFiles/<target>@synth_<n>.dir").  Paths are compared without regard to slash direction
+// (and on Windows to case).
+std::string lookup(const std::string& index, const std::string& source, const std::string& modmap) {
+  const std::string want = key(source), mm = key(modmap);
+  std::string synth;                        // the target a synthesized compile builds a BMI for
+  size_t at = mm.find("@synth_");
+  if (at != std::string::npos) {
+    size_t b = mm.rfind('/', at), e = mm.find('/', at);
+    b = b == std::string::npos ? 0 : b + 1;
+    std::string comp = mm.substr(b, e == std::string::npos ? std::string::npos : e - b);
+    std::string parent = b >= 2 ? mm.substr(0, b - 1) : "";
+    parent = parent.substr(parent.rfind('/') == std::string::npos ? 0 : parent.rfind('/') + 1);
+    if (comp.size() > 4 && comp.compare(comp.size() - 4, 4, ".dir") == 0 && parent == key("CMakeFiles"))
+      synth = comp.substr(0, comp.find('@'));   // ("" for CMake's own, "@cmake_cxx_std@synth_0")
+  }
+  FILE* f = uopen(index, false);
   if (!f) return "";
   std::string line, found;
   int c;
@@ -159,10 +186,13 @@ std::string lookup(const std::string& index, const std::string& source) {
     line.clear();
     while ((c = std::fgetc(f)) != EOF && c != '\n')
       if (c != '\r') line += (char)c;
-    size_t bar = line.rfind('|');
-    if (bar != std::string::npos && key(line.substr(0, bar)) == want) {
-      found = line.substr(bar + 1);
-      break;
+    size_t b1 = line.find('|'), b2 = b1 == std::string::npos ? b1 : line.find('|', b1 + 1), b3 = line.rfind('|');
+    if (b2 != std::string::npos && b3 > b2 && key(line.substr(b2 + 1, b3 - b2 - 1)) == want) {
+      std::string dir = key(line.substr(0, b1)) + "/";
+      if (mm.compare(0, dir.size(), dir) == 0 || (!synth.empty() && key(line.substr(b1 + 1, b2 - b1 - 1)) == synth)) {
+        found = line.substr(b3 + 1);
+        break;
+      }
     }
     if (c == EOF) break;
   }
@@ -177,7 +207,8 @@ std::string lookup(const std::string& index, const std::string& source) {
 // "pragma <s>" for each source with the textual-includes marker.  This computes exactly what Common.cmake's
 // _hu_scan_imports, _hu_import_name and _hu_find_header compute (the CMake fallback): keep the two in step.
 // A source's import lines and marker are kept in the cache file under its modification time and size, so a
-// reconfigure reads only the sources that changed.
+// reconfigure reads only the sources that changed.  A source that exists but cannot be read is not cached; the run
+// names it on stderr and exits with 3, without a result (the caller then scans with CMake).
 namespace fs = std::filesystem;
 
 bool is_ws(char c) { return c == ' ' || c == '\t'; }
@@ -241,7 +272,8 @@ bool absolute_path(const std::string& s) {
 }
 
 
-// Paths in the request, the result and the cache are UTF-8 (CMake's encoding), also on Windows.
+// Paths in the request, the result, the cache, the maps, hu-index.txt and the arguments (see arguments()) are UTF-8
+// (CMake's encoding), also on Windows.
 fs::path upath(const std::string& p) { return fs::u8path(p); }
 
 // cmake_path(NORMAL_PATH): lexically normal, with forward slashes.
@@ -249,7 +281,11 @@ std::string normal(const std::string& p) { return upath(p).lexically_normal().ge
 
 FILE* uopen(const std::string& p, bool write) {
 #ifdef _WIN32
-  return _wfopen(upath(p).c_str(), write ? L"wb" : L"rb");
+  try {                 // (u8path throws on a string that is not UTF-8: no such file)
+    return _wfopen(upath(p).c_str(), write ? L"wb" : L"rb");
+  } catch (const std::exception&) {
+    return nullptr;
+  }
 #else
   return std::fopen(p.c_str(), write ? "wb" : "rb");
 #endif
@@ -275,17 +311,20 @@ std::string stamp_of(const std::string& p) {
 
 // The import lines and the marker of a file, from the pieces file(STRINGS) gives _hu_scan_imports and Core.cmake:
 // lines without "\r", also ended by a byte that is neither printable ASCII nor a tab -- except non-ASCII bytes in a
-// file that starts with a UTF-8 byte order mark (which is skipped; file(STRINGS) then reads UTF-8).
-Scanned scan_file(const std::string& path, const std::string& stamp) {
-  Scanned r;
+// file that starts with a UTF-8 byte order mark (which is skipped; file(STRINGS) then reads UTF-8).  False if the file
+// cannot be read (not opened, or a read error: on Windows e.g. while an editor saves it or a virus scanner holds it).
+bool scan_file(const std::string& path, const std::string& stamp, Scanned& r) {
+  r = Scanned();
   r.stamp = stamp;
   FILE* f = uopen(path, false);
-  if (!f) return r;
+  if (!f) return false;
   std::string data;
   char buf[65536];
   size_t got;
   while ((got = std::fread(buf, 1, sizeof buf, f)) > 0) data.append(buf, got);
+  bool bad = std::ferror(f) != 0;
   std::fclose(f);
+  if (bad) return false;
   size_t i = 0;
   bool utf8 = data.compare(0, 3, "\xEF\xBB\xBF") == 0;
   if (utf8) i = 3;
@@ -306,7 +345,7 @@ Scanned scan_file(const std::string& path, const std::string& stamp) {
     else end_piece();
   }
   end_piece();
-  return r;
+  return true;
 }
 
 // Cache file: "f <stamp>\t<marker 0|1>\t<path>", then "i <import>" lines of that file.
@@ -385,9 +424,9 @@ std::string parent_dir(const std::string& p) {
   return s == std::string::npos ? std::string() : p.substr(0, s);
 }
 
-// <request> and <result>: ASCII paths (CMake passes them relative to the working directory).
+// <request> and <result>: CMake passes them relative to the working directory.
 int scan(const std::string& request, const std::string& result) {
-  FILE* in = std::fopen(request.c_str(), "rb");
+  FILE* in = uopen(request, false);
   if (!in) {
     std::fprintf(stderr, "hu-mapper: cannot open %s\n", request.c_str());
     return 2;
@@ -411,6 +450,7 @@ int scan(const std::string& request, const std::string& result) {
   if (!cache_file.empty()) read_cache(cache_file, cache);
   bool changed = false;
   std::string out;
+  std::set<std::string> unreadable;
   for (const Req& q : reqs) {
     out += "req " + q.id + "\n";
     std::vector<std::string> names;
@@ -422,7 +462,15 @@ int scan(const std::string& request, const std::string& result) {
       out += "file " + s + "\n";
       auto it = cache.find(s);
       if (it == cache.end() || it->second.stamp != st) {
-        cache[s] = scan_file(s, st);
+        Scanned sc;
+        if (!scan_file(s, st, sc)) {
+          // Not cached under its stamp (it would stay "no imports" until the file changes): reported below
+          if (it != cache.end()) cache.erase(it);
+          changed = true;
+          unreadable.insert(s);
+          continue;
+        }
+        cache[s] = sc;
         it = cache.find(s);
         changed = true;
       }
@@ -437,7 +485,11 @@ int scan(const std::string& request, const std::string& result) {
     out += pragmas;
   }
   if (changed && !cache_file.empty()) write_cache(cache_file, cache);
-  FILE* o = std::fopen(result.c_str(), "wb");
+  if (!unreadable.empty()) {   // no result: the caller scans with CMake, which reads the files again
+    for (const std::string& s : unreadable) std::fprintf(stderr, "hu-mapper: cannot read %s\n", s.c_str());
+    return 3;
+  }
+  FILE* o = uopen(result, true);
   if (!o) {
     std::fprintf(stderr, "hu-mapper: cannot write %s\n", result.c_str());
     return 2;
@@ -445,6 +497,29 @@ int scan(const std::string& request, const std::string& result) {
   std::fputs(out.c_str(), o);
   std::fclose(o);
   return 0;
+}
+
+// The program's arguments in UTF-8.  On Windows, argv is in the ANSI code page, which cannot spell every path (and
+// spells the others in another encoding than hu-index.txt and the maps): the arguments come from the wide command
+// line instead, which CMake and GCC (whose programs have a UTF-8 manifest) pass right.
+std::vector<std::string> arguments(int argc, char** argv) {
+  std::vector<std::string> a;
+#ifdef _WIN32
+  int n = 0;
+  if (wchar_t** w = CommandLineToArgvW(GetCommandLineW(), &n)) {
+    for (int i = 0; i < n; ++i) {
+      int len = WideCharToMultiByte(CP_UTF8, 0, w[i], -1, nullptr, 0, nullptr, nullptr);
+      std::string s(len > 0 ? len : 1, '\0');
+      if (len > 0) WideCharToMultiByte(CP_UTF8, 0, w[i], -1, &s[0], len, nullptr, nullptr);
+      s.resize(s.size() - 1);   // (the terminating NUL)
+      a.push_back(s);
+    }
+    LocalFree(w);
+    return a;
+  }
+#endif
+  for (int i = 0; i < argc; ++i) a.push_back(argv[i]);
+  return a;
 }
 
 }  // namespace
@@ -456,26 +531,28 @@ int main(int argc, char** argv) {
 #endif
   Maps m;
   bool fallback = false;
-  std::string a1 = argc > 1 ? argv[1] : "";
-  if (argc == 2 && a1 == "-v") {
-    std::puts("hu-mapper 2");
+  const std::vector<std::string> args = arguments(argc, argv);
+  const size_t n = args.size();
+  const std::string a1 = n > 1 ? args[1] : "";
+  if (n == 2 && a1 == "-v") {
+    std::puts("hu-mapper 3");
     return 0;
   }
-  if (argc == 4 && a1 == "scan") return scan(argv[2], argv[3]);
-  if (argc == 2 && a1[0] != '-') {
-    if (!load(argv[1], m)) {
-      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[1]);
+  if (n == 4 && a1 == "scan") return scan(args[2], args[3]);
+  if (n == 2 && a1[0] != '-') {
+    if (!load(args[1], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", args[1].c_str());
       return 2;
     }
-  } else if (argc == 3 && a1 == "-s") {
+  } else if (n == 3 && a1 == "-s") {
     fallback = true;
-    if (!load(argv[2], m)) {
-      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[2]);
+    if (!load(args[2], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", args[2].c_str());
       return 2;
     }
-  } else if (argc == 5 && a1 == "-c") {
-    load(argv[2], m);                       // (CMake writes it before the compile; none: no named modules)
-    std::string hu = lookup(argv[3], argv[4]);
+  } else if (n == 5 && a1 == "-c") {
+    load(args[2], m);                       // (CMake writes it before the compile; none: no named modules)
+    std::string hu = lookup(args[3], args[4], args[2]);
     if (!hu.empty() && !load(hu, m)) {
       std::fprintf(stderr, "hu-mapper: cannot open %s\n", hu.c_str());
       return 2;
