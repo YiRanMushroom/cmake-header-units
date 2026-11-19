@@ -496,6 +496,70 @@ function(test_t01_stl bdir)
   if(TC STREQUAL "msvc")
     t01_msvc_toolchain("${bdir}")
   endif()
+  bail_if_failed()
+  if(CMAKE_HOST_WIN32)
+    t01_non_ascii()
+  endif()
+endfunction()
+
+# Windows: a project whose source and build directories have non-ASCII names ("é" is in the usual ANSI code pages,
+# "中" is not), with target_auto_header_units (hu-mapper's scan) and a header unit of a header next to the source.
+# hu-mapper must be built (MinGW's linker opens its output with the ANSI code page) and, with GCC, find the source in
+# hu-index.txt and open its map (it reads its arguments from the wide command line).  The build is checked by
+# itself (ninja, ctest, no-op): the steps of hu_build_check that run commands through cmd.exe would read non-ASCII
+# paths in the OEM code page.
+function(t01_non_ascii)
+  set(na "é中")
+  if(TC STREQUAL "msvc")
+    # Not with MSVC (README, Limitations): cl prints /showIncludes in the ANSI code page ("中" becomes "?"), which the
+    # configure's self-check of the header lookup does not read as the path it predicts, also for "é".  The locked
+    # source is checked all the same.
+    set(na "ascii")
+  endif()
+  set(top "${ROOT}/t01-${na}")
+  set(src "${top}/src-${na}")          # (no blank: GCC rejects a source or build path with one)
+  set(b "${top}/b-${na}")
+  file(REMOVE_RECURSE "${top}")
+  file(WRITE "${src}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.28...4.5)\nproject(t01u CXX)\n"
+    "set(CMAKE_CXX_STANDARD 20)\ninclude(\"${PROTO}/cmake/HeaderUnits.cmake\")\n"
+    "add_executable(t01u main.cpp)\ntarget_auto_header_units(t01u)\nenable_testing()\nadd_test(NAME t01u COMMAND t01u)\n")
+  file(WRITE "${src}/local.h" "#pragma once\ninline int local_value() { return 42; }\n")
+  file(WRITE "${src}/main.cpp" "import <vector>;\nimport \"local.h\";\n"
+    "int main() { return std::vector<int>{local_value()}[0] == 42 ? 0 : 1; }\n")
+  # The first configure while main.cpp is locked (file(LOCK): reads of it fail, as while an editor saves it or a virus
+  # scanner holds it): hu-mapper reports it and does not cache it, so the next configure, unlocked, finds its imports.
+  file(LOCK "${src}/main.cpp" RESULT_VARIABLE lr)
+  run(rc out "${PROTO}" "${CMAKE_EXE}" -S "${src}" -B "${b}" -G Ninja -DCMAKE_BUILD_TYPE=Debug ${TC_ARGS})
+  file(LOCK "${src}/main.cpp" RELEASE)
+  string(REGEX REPLACE "[ \t\r\n]+" " " flat "${out}")
+  if(NOT lr EQUAL 0 OR NOT flat MATCHES "hu-mapper: cannot read [^ ]*/main[.]cpp")   # (non-ASCII output: console code page)
+    fail("a source that cannot be read (locked) was not reported by hu-mapper's scan (lock: ${lr})")
+  endif()
+  run(rc out "${PROTO}" "${CMAKE_EXE}" "${b}")
+  if(NOT rc EQUAL 0)
+    first_lines(e "${out}" 3)
+    fail("non-ASCII directories: configure failed: ${e}")
+  endif()
+  if(out MATCHES "could not build hu-mapper" OR NOT EXISTS "${b}/CMakeFiles/header_units/hu-mapper${EXE}")
+    fail("non-ASCII directories: hu-mapper was not built")
+  endif()
+  file(READ "${b}/CMakeFiles/header_units/manifest.txt" mf)
+  if(NOT mf MATCHES "[|]vector[|]" OR NOT mf MATCHES "/src-${na}/local[.]h[|]")
+    fail("non-ASCII directories: the scan did not find <vector> and \"local.h\":\n${mf}")
+  endif()
+  bail_if_failed()
+  run(rc out "${b}" ${NINJA})
+  if(NOT rc EQUAL 0)
+    first_lines(e "${out}" 3)
+    fail("non-ASCII directories: build failed: ${e}")
+  endif()
+  run(rc out "${b}" "${CTEST_EXE}" --output-on-failure)
+  if(NOT rc EQUAL 0)
+    fail("non-ASCII directories: ctest failed")
+  endif()
+  expect_noop("${b}" "non-ASCII directories")
+  bail_if_failed()
+  evid("source and build directories named *-${na}: hu-mapper built, the scan finds <vector> and \"local.h\", build+run ok, 2nd build no-op; a source locked during a configure is reported, not cached, and its imports are found by the next one")
 endfunction()
 
 # MSVC: Ninja keeps no header of the C++ library in its dependencies; the header units depend on the compiler and on a
