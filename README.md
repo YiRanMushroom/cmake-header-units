@@ -284,16 +284,17 @@ defined before the include take effect. Use it for the one source of an stb-styl
 
 * A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
   as the set's object file, so it is a real Ninja output.
-* Each consumer source gets `/headerUnit "<header>=<ifc>"` for its header units in a per-source response file.
-  `/translateInclude` is added to CMake's module-map option of the compile rule, not per source: CMake's dependency scan
-  gets the per-source options too, and `cl /scanDependencies` with `/translateInclude` recurses without end into a header
-  that includes itself through another one.
+* Each consumer source gets `/headerUnit "<header>=<ifc>"` for its header units and `/translateInclude` in a
+  per-source response file. CMake's dependency scan gets the per-source options too, and `cl /scanDependencies` with
+  `/translateInclude` recurses without end into a header that includes itself through another one, so CMake's scan rule
+  gets `/translateInclude-` at its end.
 * The header lookup assembles the include search list from the target's `/I` and `/external:I` directories, those in
   `CMAKE_CXX_FLAGS` and the compile options, and the `INCLUDE` environment variable; `cl` cannot print it. The
   self-check verifies it with `/showIncludes`.
 * An importer of a named module whose interface imports header units needs those header units too (`cl` looks them
-  up when it reads the module's IFC): the module's target gets them in its `INTERFACE_COMPILE_OPTIONS`, without
-  `/translateInclude`.
+  up when it reads the module's IFC): the module's target gets them in its `COMPILE_OPTIONS` and
+  `INTERFACE_COMPILE_OPTIONS`, without `/translateInclude`, so the #includes of its other sources and of its importers
+  stay textual.
 
 **CMake internals relied upon** (unsupported; grep `CMAKE-INTERNAL` in `cmake/`):
 
@@ -305,8 +306,8 @@ defined before the include take effect. Use it for the one source of an stb-styl
    known rule": a loud failure, never a silent misbuild.
 3. Observed Ninja-generator behaviour: per-source `COMPILE_OPTIONS` and `OBJECT_DEPENDS` also apply to the scan
    statement. The test driver re-checks this in build.ninja on every run.
-4. MSVC with Ninja: `/translateInclude` is appended to `CMAKE_CXX_MODULE_MAP_FLAG` (`@<MODULE_MAP_FILE>`), which only
-   CMake's scanned compile rule uses.
+4. MSVC with Ninja: `/translateInclude-` is appended to `CMAKE_CXX_SCANDEP_SOURCE`, the template of CMake's dependency-scan
+   rule. The module stops with an error if that template is no longer cl's `-scanDependencies` rule.
 
 ## Limitations
 

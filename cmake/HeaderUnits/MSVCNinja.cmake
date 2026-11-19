@@ -5,7 +5,8 @@
 #   written as the set's object file (/ifcOutput), so it is a real Ninja output, rebuilt when it is deleted (like GCC's
 #   -fmodule-only CMI).  The header's own #includes stay textual (no /translateInclude there).
 # * A consumer source gets /headerUnit "<path>=<ifc>" for each of its header units, and /translateInclude, in a
-#   per-source response file: an import of the header, or an #include of it, uses the IFC.
+#   per-source response file: an import of the header, or an #include of it, uses the IFC.  The dependency scan gets
+#   "/translateInclude-" (see below).
 # * IFCs are spelled relative to the top build dir (Ninja's working directory).
 # * CMake's own module scan (cl /scanDependencies) accepts an import of a header unit; it gets the same options.
 #
@@ -13,17 +14,17 @@
 
 include_guard(GLOBAL)
 
-# CMAKE-INTERNAL: CMAKE_CXX_MODULE_MAP_FLAG is CMake's private template for the module-map option of its scanned
-# compile rule (Modules/Compiler/MSVC-CXX.cmake: "@<MODULE_MAP_FILE>").  /translateInclude is appended there instead of
-# being given per source: per-source options also reach CMake's dependency scan, and cl /scanDependencies with
-# /translateInclude recurses without end into a header that includes itself through another one (fmt's core.h; t21).
-# In a compile it translates only #includes of headers that have a /headerUnit mapping (a consumer's response file).
-if(NOT CMAKE_CXX_MODULE_MAP_FLAG MATCHES "<MODULE_MAP_FILE>")
-  message(FATAL_ERROR "HeaderUnits: CMAKE_CXX_MODULE_MAP_FLAG='${CMAKE_CXX_MODULE_MAP_FLAG}' does not name "
-    "<MODULE_MAP_FILE>; this CMake version changed its internal MSVC module rule, MSVC header units cannot be supported.")
+# CMAKE-INTERNAL: CMAKE_CXX_SCANDEP_SOURCE is CMake's private template of its dependency-scan rule
+# (Modules/Compiler/MSVC-CXX.cmake).  "/translateInclude-" is appended there: a consumer's response file has
+# /translateInclude, and per-source options reach the scan as well, where cl /scanDependencies with /translateInclude
+# recurses without end into a header that includes itself through another one (fmt's core.h; t21).  The scan needs no
+# translation (CMake reads only named modules from it).
+if(NOT CMAKE_CXX_SCANDEP_SOURCE MATCHES "-scanDependencies")
+  message(FATAL_ERROR "HeaderUnits: CMAKE_CXX_SCANDEP_SOURCE='${CMAKE_CXX_SCANDEP_SOURCE}' is not cl's -scanDependencies "
+    "rule; this CMake version changed its internal MSVC scan rule, MSVC header units cannot be supported.")
 endif()
-string(APPEND CMAKE_CXX_MODULE_MAP_FLAG " /translateInclude")
-set_property(GLOBAL PROPERTY _HU_MSVC_MAP_FLAG "${CMAKE_CXX_MODULE_MAP_FLAG}")
+string(APPEND CMAKE_CXX_SCANDEP_SOURCE " /translateInclude-")
+set_property(GLOBAL PROPERTY _HU_MSVC_SCAN_RULE "${CMAKE_CXX_SCANDEP_SOURCE}")
 
 # add_header_units(), per header: in: set, h, p, oname, hudir; appends cmis.
 macro(_hu_MSVC_add_header)
@@ -41,12 +42,12 @@ endmacro()
 macro(_hu_MSVC_finish_set)
 endmacro()
 
-# _hu_check_compat(): the consumer's directory must see the module-map override.
+# _hu_check_compat(): the consumer's directory must see the scan-rule override.
 macro(_hu_MSVC_check_compat)
-    get_property(flag GLOBAL PROPERTY _HU_MSVC_MAP_FLAG)
-    get_directory_property(a DIRECTORY "${cdir}" DEFINITION CMAKE_CXX_MODULE_MAP_FLAG)
+    get_property(flag GLOBAL PROPERTY _HU_MSVC_SCAN_RULE)
+    get_directory_property(a DIRECTORY "${cdir}" DEFINITION CMAKE_CXX_SCANDEP_SOURCE)
     if(NOT a STREQUAL flag)
-      string(APPEND why "\n  CMAKE_CXX_MODULE_MAP_FLAG in the consumer's directory is not the HeaderUnits override "
+      string(APPEND why "\n  CMAKE_CXX_SCANDEP_SOURCE in the consumer's directory is not the HeaderUnits override "
                         "(include(HeaderUnits) must run in the top-level CMakeLists.txt before add_subdirectory())")
     endif()
 endmacro()
@@ -109,8 +110,9 @@ macro(_hu_MSVC_consumer_options)
       if(NOT known)
         set_property(GLOBAL APPEND PROPERTY _HU_MSVC_IFACE_TARGETS "${t}")
       endif()
-      set_property(GLOBAL APPEND_STRING PROPERTY _HU_MSVC_IFACE_${tk} "${rsp_lines}")
+      set_property(GLOBAL APPEND_STRING PROPERTY _HU_MSVC_IFACE_${tk} "${rsp_lines}")   # (the mappings only)
     endif()
+    string(APPEND rsp_lines "/translateInclude\n")   # an #include of a header with a header unit imports it
     # A response file, as with Clang: CMake runs some commands through cmd.exe (8191 characters).
     string(SUBSTRING "${sdk}" 0 16 rk)
     get_filename_component(sn "${src}" NAME)
@@ -122,7 +124,8 @@ endmacro()
 
 # _hu_finalize(), after every consumer source: each target with module interface units that import header units gets
 # their mappings in its INTERFACE_COMPILE_OPTIONS (one response file per target), and in its own COMPILE_OPTIONS: an
-# importer whose options differ from the module's target makes CMake build a second BMI of the module for it.
+# importer whose options differ from the module's target makes CMake build a second BMI of the module for it.  Without
+# /translateInclude a mapping changes no #include, so these targets' other sources stay as they were.
 macro(_hu_MSVC_consumers_done)
     get_property(itargets GLOBAL PROPERTY _HU_MSVC_IFACE_TARGETS)
     foreach(it IN LISTS itargets)
@@ -135,7 +138,7 @@ macro(_hu_MSVC_consumers_done)
       string(SUBSTRING "${itk}" 0 16 irk)
       set(irsp "${hudir}/rsp/iface_${irk}.rsp")
       file(CONFIGURE OUTPUT "${irsp}" CONTENT "${ilines}\n" @ONLY)
-      set_property(TARGET ${it} APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "@${irsp}")
+      set_property(TARGET ${it} APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<BUILD_INTERFACE:@${irsp}>")
       set_property(TARGET ${it} APPEND PROPERTY COMPILE_OPTIONS "@${irsp}")
     endforeach()
 endmacro()
