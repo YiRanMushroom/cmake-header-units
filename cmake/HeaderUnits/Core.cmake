@@ -108,7 +108,6 @@ function(add_header_units set)
   set(mids)
   set(mmaps)
   set(hmaps)
-  set(maplines "")
   foreach(h p IN ZIP_LISTS A_HEADERS paths)
     if(IS_ABSOLUTE "${h}")
       # a header found relative to a source file (quote import), given by absolute path: short object name
@@ -131,27 +130,17 @@ function(add_header_units set)
     list(APPEND rpaths "${p}")
   endforeach()
 
-  cmake_language(CALL _hu_${tc}_finish_set)
-
-  # Import declarations inside the headers: an error unless HU_ALLOW_HEADER_IMPORTS is ON (experimental).
-  foreach(h p IN ZIP_LISTS A_HEADERS rpaths)
-    _hu_scan_imports(imps "${p}")
-    if(NOT imps)
-      continue()
-    endif()
-    if(NOT HU_ALLOW_HEADER_IMPORTS)
-      set(shown "${imps}")
-      list(TRANSFORM shown REPLACE "^a\\|(.*)$" "import <\\1>")
-      list(TRANSFORM shown REPLACE "^q\\|(.*)$" "import \"\\1\"")
-      string(JOIN ", " shown ${shown})
-      message(FATAL_ERROR "add_header_units(${set}): header <${h}> ('${p}') contains ${shown}. Import declarations inside "
-        "headers are not supported yet: use #include in headers (inside a TU that receives the header units, a "
-        "#include of a header unit is turned into an import automatically), or set HU_ALLOW_HEADER_IMPORTS ON "
-        "(experimental: header units that import other header units).")
-    endif()
-    string(MD5 hk "${p}")
-    set_property(GLOBAL PROPERTY _HU_HDRIMPORTS_${hk} "${imps}")
-  endforeach()
+  # HU_ALLOW_HEADER_IMPORTS: the import declarations of each header, by the path the toolchain compiles (without it, a
+  # header with one stopped the configure above).
+  if(HU_ALLOW_HEADER_IMPORTS)
+    foreach(p IN LISTS rpaths)
+      _hu_scan_imports(imps "${p}")
+      if(imps)
+        string(MD5 hk "${p}")
+        set_property(GLOBAL PROPERTY _HU_HDRIMPORTS_${hk} "${imps}")
+      endif()
+    endforeach()
+  endif()
   # Registry: a header is identified by its real path (a symbolic link, an 8.3 name, "dir/../x.h" are the same file):
   # real path -> set, used by target_auto_header_units (reuse) and header imports (_hu_lookup).
   foreach(rp IN LISTS reals)
@@ -171,7 +160,6 @@ function(add_header_units set)
   set_property(GLOBAL PROPERTY _HU_SET_${set}_SEARCH_RAW "${S_RAW}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_PIC "${pic}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_OPTS "${A_COMPILE_OPTIONS}")
-  set_property(GLOBAL PROPERTY _HU_SET_${set}_MAPLINES "${maplines}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_CMIS "${cmis}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_MIDS "${mids}")
   set_property(GLOBAL PROPERTY _HU_SET_${set}_MMAPS "${mmaps}")

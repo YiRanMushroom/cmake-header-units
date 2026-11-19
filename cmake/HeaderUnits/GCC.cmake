@@ -259,7 +259,7 @@ function(_hu_gcc_wrapper src_out keys_out hudir p)
   set(${keys_out} "${keys}" PARENT_SCOPE)
 endfunction()
 
-# add_header_units(), per header: in: set, h, p (resolved path), oname, hudir; appends cmis, hmaps, maplines.
+# add_header_units(), per header: in: set, h, p (resolved path), oname, hudir; appends cmis, hmaps.
 macro(_hu_GCC_add_header)
     # GCC: a header unit's identity is the path string; CMake passes the source as this absolute path.
     cmake_path(NORMAL_PATH p OUTPUT_VARIABLE np)
@@ -294,13 +294,6 @@ macro(_hu_GCC_add_header)
     else()
       set(hmap "${hudir}/gcc/${cfg}${set}/${oname}.map")
     endif()
-    # Keys: the spellings GCC may use for this header with the set's search list (consumers get their own, at the end).
-    _hu_gcc_keys(hkeys "${p}" "${h}" DIRS ${S_DIRS} RAW ${S_RAW})
-    set(keys "")
-    foreach(kk IN LISTS hkeys)
-      _hu_gcc_line(l "${kk}" "${rcmi}")
-      string(APPEND keys "${l}")
-    endforeach()
     # The header unit's own mapper makes GCC translate no #include inside it into an import (CMI content independent of
     # build order), not even one of the header itself: hu-mapper answers the export with the CMI and an #include of the
     # header (each spelling) with "textual"; without hu-mapper, the wrapper is compiled and only it is listed.
@@ -318,7 +311,6 @@ macro(_hu_GCC_add_header)
     endif()
     _hu_write("${hmap}" "${hlines}" UNIX)
     list(APPEND hmaps "${hmap}")
-    string(APPEND maplines "${keys}")
     set_source_files_properties("${hsrc}" TARGET_DIRECTORY ${set} PROPERTIES
       LANGUAGE CXX
       OBJECT_NAME "hu/${oname}"
@@ -328,11 +320,6 @@ macro(_hu_GCC_add_header)
       # '-MM'"), as IDEs run these flags to read the compiler's settings (CLion).
       COMPILE_OPTIONS "-fmodules;-fmodule-header;-fmodule-only;${mopt};-Mno-modules")
     list(APPEND cmis "${cmi}")
-endmacro()
-
-# add_header_units(), after the headers: nothing for GCC (a header inside the build tree needs no launcher: the
-# wrapper is what CMake compiles and what the header unit's own mapper names).
-macro(_hu_GCC_finish_set)
 endmacro()
 
 # _hu_check_compat(): the consumer's directory must see the mapper override.
@@ -500,10 +487,7 @@ macro(_hu_GCC_consumer_options)
     string(SUBSTRING "${_hu_gmk}" 0 16 _hu_gmk)
     get_property(cfg GLOBAL PROPERTY _HU_CFG)
     set(smap "${hudir}/gcc-m/${cfg}${_hu_gmk}.map")
-    if(NOT DEFINED _hu_gw_${_hu_gmk})
-      set(_hu_gw_${_hu_gmk} 1)
-      _hu_write("${smap}" "$root .\n${content}" UNIX)
-    endif()
+    _hu_write("${smap}" "$root .\n${content}" UNIX ONCE)
     # One index line per (target, source), written for all the source's targets at once: every directory computes the
     # same map for it (above), and this macro runs once per (directory, source).  Keyed by the target's object
     # directory (_hu_gcc_objdir: the compile's module map is in it) and Ninja's $in (CMAKE-INTERNAL: the Ninja
