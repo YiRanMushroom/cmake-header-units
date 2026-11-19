@@ -1,0 +1,3 @@
+import <t28_scan.h>;
+
+int gen_s() { return t28_scan(); }

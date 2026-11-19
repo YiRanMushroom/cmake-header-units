@@ -102,6 +102,12 @@ from a developer prompt. MSVC needs CMake >= 3.28 and a Visual Studio generator,
 
 ## Commands
 
+A target's C++ sources are the files CMake compiles as C++ for it: its `SOURCES` and `CXX_MODULES` file sets, by the
+source's `LANGUAGE` property or else its extension (`CMAKE_CXX_SOURCE_FILE_EXTENSIONS`), except `HEADER_FILE_ONLY`
+ones. Sources given with generator expressions (`$<TARGET_OBJECTS:...>`, a source of some configurations) are only
+known when CMake generates the build system: the commands do not see them (not scanned, no header units). A relative
+path names the file where CMake finds it: in the source directory, else in the build directory (a generated source).
+
 ### target_auto_header_units
 
 ```
@@ -110,7 +116,7 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
                          [EXCLUDE <name>...] [NO_RECONFIGURE])
 ```
 
-* Scans the target's C++ sources (including `CXX_MODULES` file sets) for `import <x>;` and `import "x";` (also with
+* Scans the target's C++ sources for `import <x>;` and `import "x";` (also with
   `export`).
 * A header that already belongs to a set is reused, whether it was declared or discovered for another target. Reuse
   is decided by the file the name resolves to with this target's include paths, not by the name: `<config.h>` from two
@@ -132,8 +138,7 @@ target_auto_header_units(<target> [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRECTORIES
   * imports produced by macros are not;
   * imports inside `#if` are considered whatever the condition. A header that cannot be found with the target's include
     paths is skipped silently (e.g. a platform header in an inactive branch; shown with `--log-level=VERBOSE`). A header
-    that exists but does not compile as a header unit in this configuration still fails the build;
-  * sources added with generator expressions are not scanned.
+    that exists but does not compile as a header unit in this configuration still fails the build.
 
 ### target_header_units_scan_sources
 
@@ -145,7 +150,8 @@ The same as `target_auto_header_units`, but only for the listed sources:
 
 * only they are scanned for imports, and only they receive header units. The target's other sources are left alone:
   their `#include`s stay textual, and an `import` in them does not compile;
-* paths are relative to the current source directory. A file that is not a C++ source of the target is a
+* a relative path is looked up in the current source directory, else in the current build directory. A file that is
+  not a C++ source of the target, or that does not exist at configure time (generated at build time), is a
   configure-time error;
 * it can be called several times for one target: headers that already have a header unit are reused, the rest go into
   `<target>_hu`, `<target>_hu_2`, ...;
@@ -184,7 +190,8 @@ add_header_units(<set> HEADERS <name>... [LINK_LIBRARIES <tgt>...] [INCLUDE_DIRE
 target_import_header_units(<target> <set> [SOURCES <src>...])
 ```
 
-Gives the set's header units to all C++ sources of the target, or only to the listed ones.
+Gives the set's header units to all C++ sources of the target, or only to the listed ones (a relative path as for
+`target_header_units_scan_sources`).
 
 * The consumer's language settings must match the set's: C++ standard, extensions (not with MSVC and clang-cl, where
   they change nothing), exception and RTTI options,
@@ -491,6 +498,7 @@ Each test is a standalone CMake project with a one-line README:
 | t25_shared_source | one source compiled by three targets that import the same set, each spelling the include directory differently (`a/../inc`; in one directory `b/../inc` and `b/../b/../inc`): every compile imports `<sh.h>` and translates `#include <sh2.h>` (GCC: checked in the depfiles) |
 | t26_shared_targets | one source compiled by a target that imports a set and, in another directory, by one that does not: a clean build of only the second builds no header unit and keeps the `#include` textual (depfile), also after an edit of the header |
 | t27_module_two_targets | one module interface source (importing `<vector>`) compiled by two targets of one directory, each imported by a program without header units of its own: both programs build and run (with MSVC each module target's importers need its header-unit mappings) |
+| t28_cxx_sources | which sources are a target's C++ sources, by one rule for the scan and the header units: a module unit in the default `CXX_MODULES` file set, a build-directory source listed by a relative path (also with `target_header_units_scan_sources`) and a `.c` file with `LANGUAGE CXX` are scanned and get header units; a `HEADER_FILE_ONLY` source is not scanned; generator-expression sources (a configuration's source, `$<TARGET_OBJECTS:...>`) are skipped |
 
 For each test, `tests/run_suite.cmake` runs:
 
