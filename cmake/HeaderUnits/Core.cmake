@@ -309,6 +309,12 @@ function(_hu_finalize_run)
         continue()
       endif()
       get_filename_component(d "${p}" DIRECTORY)
+      get_property(cfg GLOBAL PROPERTY _HU_CFG)
+      if(cfg)
+        message(FATAL_ERROR "HeaderUnits: header <${h}> ('${p}', set ${s}) imports header units (HU_ALLOW_HEADER_IMPORTS); "
+          "with Ninja Multi-Config this is not supported: its build order needs OBJECT_DEPENDS on the imported BMIs, "
+          "which take no per-configuration paths.")
+      endif()
       set(opts)
       set(deps)
       set(maplines "")
@@ -487,8 +493,15 @@ function(_hu_finalize_run)
     # OBJECT_DEPENDS are applied to the dependency-SCAN statement of the source as well as to its compile
     # statement.  That is what orders the BMI builds before the scan; tests/run_suite.cmake verifies it in
     # build.ninja for every consumer.  (add_dependencies() alone does NOT order object compilation in Ninja.)
+    # Ninja Multi-Config: OBJECT_DEPENDS takes no per-configuration paths (no generator expressions).  There the
+    # <set>_ready targets order the scan and compile of every source of the consumer after the BMIs (a utility target's
+    # dependents' object order goes through it), and the compiler's depfile, which names each BMI it read
+    # (-fmodule-file-deps, GCC's CMI dependencies), rebuilds the source when one changes.
     set_property(SOURCE "${src}" TARGET_DIRECTORY ${t} APPEND PROPERTY COMPILE_OPTIONS ${opts})
-    set_property(SOURCE "${src}" TARGET_DIRECTORY ${t} APPEND PROPERTY OBJECT_DEPENDS ${deps})
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    if(NOT cfg)
+      set_property(SOURCE "${src}" TARGET_DIRECTORY ${t} APPEND PROPERTY OBJECT_DEPENDS ${deps})
+    endif()
     set_property(SOURCE "${src}" TARGET_DIRECTORY ${t} PROPERTY CXX_SCAN_FOR_MODULES ON)
   endforeach()
   cmake_language(CALL _hu_${tc}_consumers_done)

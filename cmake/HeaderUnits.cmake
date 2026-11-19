@@ -38,9 +38,9 @@ endif()
 if(CMAKE_VERSION VERSION_LESS 4.2)
   message(FATAL_ERROR "HeaderUnits: CMake >= 4.2 is required (OBJECT_NAME source property).")
 endif()
-if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
-  message(FATAL_ERROR "HeaderUnits: with GCC, Clang and MSVC only the single-config Ninja generator is supported (MSVC: also "
-    "a Visual Studio generator) (found '${CMAKE_GENERATOR}').")
+if(NOT CMAKE_GENERATOR MATCHES "^Ninja( Multi-Config)?$")
+  message(FATAL_ERROR "HeaderUnits: with GCC, Clang and MSVC only the Ninja generators are supported (Ninja; Ninja "
+    "Multi-Config with GCC and Clang; MSVC: also a Visual Studio generator) (found '${CMAKE_GENERATOR}').")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -64,6 +64,21 @@ else()
     "(frontend '${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}'). Supported: GCC, Clang (clang++ or clang-cl) and MSVC with "
     "Ninja, and MSVC with a Visual Studio generator.")
 endif()
+get_property(_hu_multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_hu_multi AND _HU_TC STREQUAL "MSVC")
+  message(FATAL_ERROR "HeaderUnits: MSVC with Ninja Multi-Config is not supported: Ninja learns what an MSVC compile "
+    "read from /showIncludes, which lists no header units (IFCs), so a consumer would not be rebuilt when a header unit "
+    "changes (the single-config Ninja build lists them with OBJECT_DEPENDS, which takes no per-configuration paths). "
+    "Use the Ninja generator (a build directory per configuration) or a Visual Studio generator.")
+endif()
+# Ninja Multi-Config: a BMI per configuration (objects go to CMakeFiles/<target>.dir/<config>/), so the paths of BMIs and
+# of the files that name them contain "$<CONFIG>/" (_HU_CFG) and those files are written per configuration (_hu_write).
+if(_hu_multi)
+  set_property(GLOBAL PROPERTY _HU_CFG "$<CONFIG>/")
+else()
+  set_property(GLOBAL PROPERTY _HU_CFG "")
+endif()
+unset(_hu_multi)
 set(_HU_DIR "${CMAKE_BINARY_DIR}/CMakeFiles/header_units")
 set_property(GLOBAL PROPERTY _HU_TC "${_HU_TC}")
 set_property(GLOBAL PROPERTY _HU_DIR "${_HU_DIR}")

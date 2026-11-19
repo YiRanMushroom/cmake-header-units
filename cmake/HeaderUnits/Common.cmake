@@ -784,6 +784,22 @@ endfunction()
 # receives a header unit for <h> of another file than the one it finds, and that file has no header unit among the
 # sets it receives (an import of <h> would fail; a #include stays textual).  A consumer that also has a header unit
 # of its own file is fine (e.g. a reused set brings another <config.h>, unused here).
+# Writes <path> with <content>, rewritten only when the content changes; UNIX: "\n" line ends.  In a multi-config build
+# tree (_HU_CFG) <path> and <content> contain $<CONFIG>: one file per configuration (file(GENERATE)).
+function(_hu_write path content)
+  cmake_parse_arguments(A "UNIX" "" "" ${ARGN})
+  set(nl)
+  if(A_UNIX)
+    set(nl NEWLINE_STYLE UNIX)
+  endif()
+  get_property(cfg GLOBAL PROPERTY _HU_CFG)
+  if(cfg)
+    file(GENERATE OUTPUT "${path}" CONTENT "${content}" ${nl})
+  else()
+    file(CONFIGURE OUTPUT "${path}" CONTENT "${content}" @ONLY ${nl})
+  endif()
+endfunction()
+
 # file(REAL_PATH) of an existing file or directory, asked once per configure run (a real path changes only when a
 # symbolic link is made, which a configure run does not do to the files it looks up).
 function(_hu_real_path out p)

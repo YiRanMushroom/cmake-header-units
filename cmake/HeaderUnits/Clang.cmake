@@ -57,7 +57,8 @@ macro(_hu_Clang_add_header)
       # build dir.  The options are shared by every set of this directory with this header, so the set's directory is
       # spelled $<TARGET_PROPERTY:NAME>: the target that compiles it.
       file(RELATIVE_PATH od "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
-      list(APPEND copts "/clang:-o${od}/$<TARGET_PROPERTY:NAME>.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+      get_property(cfg GLOBAL PROPERTY _HU_CFG)
+      list(APPEND copts "/clang:-o${od}/$<TARGET_PROPERTY:NAME>.dir/${cfg}hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
     endif()
     list(APPEND copts "-Wno-unused-command-line-argument")
     set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
@@ -68,7 +69,8 @@ macro(_hu_Clang_add_header)
     # with the default CMAKE_INTERMEDIATE_DIR_STRATEGY=FULL).  Needed because OBJECT_DEPENDS does not accept
     # $<TARGET_OBJECTS> (and, for clang-cl, to name the PCM above).  If CMake ever places the object elsewhere, Ninja
     # stops with "missing and no known rule to make it" (loud failure, never a silent misbuild).
-    list(APPEND cmis "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    list(APPEND cmis "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/${cfg}hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
 endmacro()
 
 # add_header_units(), after the headers: nothing to do for Clang.
@@ -133,10 +135,11 @@ macro(_hu_Clang_consumer_options)
     # the compile (file(CONFIGURE) rewrites it only when its content changes).
     string(MD5 rk "${rsp_lines}")
     string(SUBSTRING "${rk}" 0 16 rk)
-    set(rsp "${hudir}/rsp/${rk}.rsp")
+    get_property(cfg GLOBAL PROPERTY _HU_CFG)
+    set(rsp "${hudir}/rsp/${cfg}${rk}.rsp")
     if(NOT DEFINED _hu_cw_${rk})
       set(_hu_cw_${rk} 1)
-      file(CONFIGURE OUTPUT "${rsp}" CONTENT "${rsp_lines}" @ONLY)
+      _hu_write("${rsp}" "${rsp_lines}")
     endif()
     list(APPEND deps ${_hu_cdeps})
     if(NOT hu_textual)

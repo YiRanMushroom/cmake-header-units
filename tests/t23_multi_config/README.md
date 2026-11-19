@@ -1,0 +1,1 @@
+t23: Ninja Multi-Config: Debug and Release each build and run with their own header units (the header's value depends on NDEBUG); a header edit rebuilds the BMI and its consumers of that configuration in one ninja run; a deleted BMI is rebuilt; MSVC is rejected at configure time with the reason.

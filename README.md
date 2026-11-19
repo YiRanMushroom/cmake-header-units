@@ -21,7 +21,9 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 
 MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja and clang-cl with CMake 4.5.0 (see Results).
 
-Not supported: multi-config generators with GCC/Clang/MSVC-Ninja.
+GCC and Clang also work with the **Ninja Multi-Config** generator (a BMI per configuration). Not supported: MSVC with
+Ninja Multi-Config (rejected at configure time: Ninja learns an MSVC compile's inputs from `/showIncludes`, which lists
+no IFCs, so consumers would not rebuild when a header unit changes).
 
 ## Quick start
 
@@ -91,7 +93,7 @@ target_import_header_units(app hu_std)                    # all C++ sources of a
 target_import_header_units(app hu_fmt SOURCES main.cpp)   # only main.cpp
 ```
 
-Requirements: GCC/Clang need CMake >= 4.2, the single-config **Ninja** generator and C++20 or later; clang-cl runs
+Requirements: GCC/Clang need CMake >= 4.2, the **Ninja** or **Ninja Multi-Config** generator and C++20 or later; clang-cl runs
 from a developer prompt. MSVC needs CMake >= 3.28 and a Visual Studio generator, or CMake >= 4.2, Ninja and MSVC 19.40
 (Visual Studio 2022 17.10) or later, run from a developer prompt.
 
@@ -251,6 +253,11 @@ defined before the include take effect. Use it for the one source of an stb-styl
   with `hu-mapper`'s scan and 3-3.5 s with CMake's (MinGW GCC, clang++ and MSVC; the same build files either way).
 * BMI paths are spelled relative to the build directory, so compiler depfiles name the same Ninja nodes and an edit
   rebuilds everything that depends on it in one `ninja` run.
+* Ninja Multi-Config: each configuration has its own BMIs (`CMakeFiles/<set>.dir/<config>/hu/...`), and the files
+  that name them (Clang's response files, GCC's mapper files and `hu-index.txt`) are written per configuration with
+  `file(GENERATE)` and `$<CONFIG>`; GCC's compile rule names the index with Ninja's `$CONFIG`. `OBJECT_DEPENDS` takes
+  no per-configuration paths, so consumers get none: the `<set>_ready` targets order their scan and compile after the
+  BMIs, and the compiler's depfile, which names each BMI it read, rebuilds them when one changes.
 
 **GCC** (`cmake/HeaderUnits/GCC.cmake`):
 
@@ -339,12 +346,16 @@ scheme):
    statement. The test driver re-checks this in build.ninja on every run.
 4. MSVC with Ninja: `/translateInclude-` is appended to `CMAKE_CXX_SCANDEP_SOURCE`, the template of CMake's dependency-scan
    rule. The module stops with an error if that template is no longer cl's `-scanDependencies` rule.
+5. Ninja Multi-Config: objects in `CMakeFiles/<target>.dir/<config>/`, and the Ninja variable `CONFIG` that CMake sets on
+   each compile edge (GCC's compile rule names the configuration's `hu-index.txt` with it).
 
 ## Limitations
 
 * This is a prototype. Kitware considers DIY header units unsupported; CMake issue #25293 tracks native support.
 * GCC/Clang:
-  * single-config Ninja only;
+  * Ninja and Ninja Multi-Config only. With Ninja Multi-Config: GCC needs `hu-mapper` (no `HU_GCC_WRAPPERS`),
+    `HU_ALLOW_HEADER_IMPORTS` is rejected, and the header lookup uses the flags common to all configurations
+    (`CMAKE_CXX_FLAGS`, not `CMAKE_CXX_FLAGS_<CONFIG>`);
   * header-unit sets cannot be installed or exported;
   * BMIs cannot be moved to another location.
 * GCC:
@@ -440,6 +451,7 @@ Each test is a standalone CMake project with a one-line README:
 | t20_wrong_file | a consumer whose include path finds another `a.h` (without a header unit) than its set's: configure warns, naming both files; the build then fails on `dirB/a.h` |
 | t21_self_include | a header that includes itself through another one (as fmt's `core.h` includes `"format.h"`): builds, rebuilds after a change to a header it includes, and is a no-op after each build; with GCC also with `HU_GCC_WRAPPERS` and cross-compiling (an explicit `CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler), and with its headers in a directory with a space (with `HU_GCC_WRAPPERS` a configure error) |
 | t22_import_std | `import std;` (CMake's `CMAKE_CXX_MODULE_STD`) in the same TUs as a header unit whose header includes `<string>`: one TU imports both, another `#include`s the header next to `import std;`. Needs CMake 4.5 (SKIP before: `import std` is experimental there); with Clang in the Linux image the driver names GCC's `libstdc++.modules.json` |
+| t23_multi_config | Ninja Multi-Config: Debug and Release build and run with their own header units (the header's value depends on `NDEBUG`), each a no-op after; a header edit rebuilds the BMI and its consumers in one `ninja` run; a deleted BMI is rebuilt; the consumer's depfile names its BMI; MSVC (and GCC with `HU_GCC_WRAPPERS`) is rejected at configure time with the reason |
 
 For each test, `tests/run_suite.cmake` runs:
 
