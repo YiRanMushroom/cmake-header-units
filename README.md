@@ -427,7 +427,6 @@ cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-throu
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
 tests/t01..t25/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
-tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
 run-linux.sh, run-win.bat        run the suite (Linux: GCC, Clang + libstdc++, Clang + libc++; Windows: clang++ + MSVC STL)
@@ -534,8 +533,6 @@ How to run:
   header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
   for those headers; the IDE probe and t04's extensions variant do not apply. t01 also checks that a CMake run without
   changes compiles nothing and that one with another `INCLUDE` rebuilds the header units and their consumer.
-* Adversarial scenarios: `tests/attack/run-attack-linux.sh` and `tests/attack/run-attack-win.bat`; results are in
-  `tests/attack/RESULTS.md`.
 
 ## Results
 
@@ -617,10 +614,6 @@ build and ctest only).
 The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
 unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A
 project without HeaderUnits.cmake shows the same: `#include <fmt/format.h>` links, `import <fmt/format.h>;` does not.
-
-Adversarial scenarios (`tests/attack/RESULTS.md`): after the fixes every scenario behaves as expected on all three
-toolchains. The remaining failures are the documented limitations: consumer-only `_GLIBCXX_DEBUG` (a04), and on GCC
-a symlinked include directory (a08).
 
 
 ## Background

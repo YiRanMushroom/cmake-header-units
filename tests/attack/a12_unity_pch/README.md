@@ -1,1 +1,0 @@
-Scenario: UNITY_BUILD target where only some sources import the header unit (u1, u2 import <vector>, u3 includes it textually), and a target with a PCH of <string> whose source imports <vector>. EXPECTED (gcc, clang, win): build OK, a12_unity and a12_pch exit 0, no-op.

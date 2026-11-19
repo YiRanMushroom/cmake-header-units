@@ -1,1 +1,0 @@
-Scenario: build-tree lifecycle (the original had no driver script; these steps were chosen by the porter): fresh build, re-run cmake, delete a header-unit BMI, ninja clean, touch CMakeLists.txt. EXPECTED (gcc, clang, win): every step builds, a09 exits 0 after each step, and ninja is a no-op after each step.

@@ -1,1 +1,0 @@
-Scenario: one source (common/shared.cpp, imports the header unit) compiled by two executables defined in two different directories (d1/, d2/), both importing the same set. EXPECTED (gcc, clang, win): build OK, a03_d1 and a03_d2 exit 0, no-op (README only rejects one source with DIFFERENT sets).

@@ -1,1 +1,0 @@
-Scenario: header name chosen so that the header-unit object path is exactly 255 characters (Windows MAX_PATH region). EXPECTED: win: build OK, a06 exits 0 (or a clear error); gcc/clang: build OK, a06 exits 0 (no path limit at this length on Linux).
