@@ -352,6 +352,9 @@ function(_hu_finalize_run)
   endforeach()
   get_property(cnt GLOBAL PROPERTY _HU_REQ_COUNT)
   if(NOT cnt)
+    # No consumer (none left): the toolchain's last step still runs, so that what the compile rule reads describes this
+    # configure (GCC: an empty hu-index.txt, not the previous configure's).
+    cmake_language(CALL _hu_${tc}_consumers_done)
     return()
   endif()
   foreach(i RANGE 1 ${cnt})
