@@ -1429,7 +1429,7 @@ function(test_t21_self_include bdir)
     run(rc out "${PROTO}" "${CMAKE_EXE}" -S "${PROTO}/tests/t21_self_include" -B "${bdir}-space-wrappers" -G Ninja ${TC_ARGS}
         "-DT21_INCLUDE_DIR=${sd}" "-DT21_VALUE_DIR=${bdir}-space-value" -DHU_GCC_WRAPPERS=ON)
     string(REGEX REPLACE "[ \t\r\n]+" " " flat "${out}")
-    if(rc EQUAL 0 OR NOT flat MATCHES "selfinc[.]h> resolves to '[^']*space headers/selfinc[.]h' [(]contains a space[)]")
+    if(rc EQUAL 0 OR NOT flat MATCHES "selfinc[.]h> resolves to '[^']*space headers/selfinc[.]h' [(]contains a space or a non-ASCII character[)]")
       fail("with HU_GCC_WRAPPERS, a header unit in a directory with a space was not rejected at configure time")
     endif()
     string(APPEND w "; its headers in a directory with a space${ns} (with HU_GCC_WRAPPERS a configure error)")

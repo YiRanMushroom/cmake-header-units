@@ -43,6 +43,11 @@ if(_hu_cfg AND NOT _hu_mapper)
   message(FATAL_ERROR "HeaderUnits: with GCC and Ninja Multi-Config, hu-mapper is required (not HU_GCC_WRAPPERS, and a "
     "host compiler when cross-compiling): the wrappers and scripts of the fallback have no per-configuration maps.")
 endif()
+if(NOT _hu_mapper AND NOT _HU_DIR MATCHES "^[ -~]*$")
+  message(FATAL_ERROR "HeaderUnits: with GCC and without hu-mapper (HU_GCC_WRAPPERS, or cross-compiling without a host "
+    "compiler) the build directory must be ASCII: GCC quotes a non-ASCII path in its module-mapper requests, which its "
+    "own mapper-file reader does not understand (found '${_HU_DIR}').")
+endif()
 if(NOT _hu_mapper AND CMAKE_HOST_WIN32 AND _HU_DIR MATCHES "[&|<>^%,;=]")
   message(FATAL_ERROR "HeaderUnits: with GCC on Windows and without hu-mapper the build directory must not contain any of "
     "& | < > ^ % , ; = (the module mapper runs through cmd.exe, which splits or interprets them).")
@@ -268,9 +273,10 @@ macro(_hu_GCC_add_header)
         "path. CMake would compile '${np}', a different header-unit identity for GCC. Not supported.")
     endif()
     get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
-    if(NOT mapper AND p MATCHES "[ \t]")
-      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space); without hu-mapper "
-        "(HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files cannot express it.")
+    if(NOT mapper AND (p MATCHES "[ \t]" OR NOT p MATCHES "^[ -~]*$"))
+      message(FATAL_ERROR "add_header_units(${set}): <${h}> resolves to '${p}' (contains a space or a non-ASCII "
+        "character); without hu-mapper (HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper files "
+        "cannot express it (GCC quotes such a path, and its own mapper-file reader does not understand quotes).")
     endif()
     file(REAL_PATH "${p}" rpo)
     string(MD5 ok "${rpo}")

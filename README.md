@@ -380,8 +380,8 @@ scheme):
   * one header unit per header per build tree;
   * no blanks in source paths or the build directory, and without `hu-mapper` none in header paths;
   * on Windows (MinGW-w64), non-ASCII source and build directories work with `hu-mapper` (the default); without it
-    (`HU_GCC_WRAPPERS` ON), a build directory with a character outside the ANSI code page (e.g. 中) fails in GCC's own
-    module mapper;
+    (`HU_GCC_WRAPPERS` ON), a non-ASCII build directory or header path is rejected at configure time: GCC quotes such a
+    path in its module-mapper requests, which its own mapper-file reader does not understand;
   * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
     reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
     predates the header lookup without `try_compile` (same failure with the earlier code).
