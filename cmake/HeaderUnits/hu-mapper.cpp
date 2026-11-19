@@ -1,5 +1,11 @@
-// HeaderUnits.cmake -- the GCC module mapper for building one header unit (GCC.cmake compiles this file at configure
-// time with the project's own compiler and passes "-fmodule-mapper=|hu-mapper <map file>" to the header unit's compile).
+// HeaderUnits.cmake -- the GCC module mapper (GCC.cmake compiles this file at configure time with the project's own
+// compiler).  Three uses:
+//   hu-mapper <map>                        a header unit's own compile ("-fmodule-mapper=|hu-mapper <map>")
+//   hu-mapper -s <map>                     a consumer's dependency scan: <map> lists its header units; an unknown
+//                                          (named) module gets a fallback name, as the scan never reads it
+//   hu-mapper -c <modmap> <index> <source> a consumer's compile: CMake's module map of the TU (named modules) plus the
+//                                          header-unit map that <index> ("<source>|<map>" per line) gives <source>
+//                                          (Ninja's $in; relative = inside the build dir, its working directory)
 //
 // GCC asks a mapper two things through the same table: where to write the CMI of the header unit it builds
 // (MODULE-EXPORT), and whether an #include it meets is a header unit (INCLUDE-TRANSLATE).  GCC's own file mapper answers
@@ -20,8 +26,11 @@
 #include <string>
 #include <vector>
 #ifdef _WIN32
+#include <direct.h>
 #include <fcntl.h>
 #include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace {
@@ -87,6 +96,91 @@ bool read_line(std::string& line) {
   return c != EOF || !line.empty();
 }
 
+
+
+struct Maps {
+  std::string root = ".", exported;
+  std::set<std::string> textual;
+  std::map<std::string, std::string> units;
+};
+
+// One map file (see above); false if it cannot be opened.
+bool load(const std::string& path, Maps& m) {
+  FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) return false;
+  std::string line;
+  int c;
+  for (;;) {
+    line.clear();
+    while ((c = std::fgetc(f)) != EOF && c != '\n')
+      if (c != '\r') line += (char)c;
+    std::vector<std::string> w = words(line);
+    if (w.size() == 2 && w[0] == "$root") m.root = w[1];
+    else if (w.size() == 2 && w[0] == "$export") m.exported = w[1];
+    else if (w.size() == 2 && w[0] == "$textual") m.textual.insert(w[1]);
+    else if (w.size() == 2 && w[0][0] != '$') m.units[w[0]] = w[1];
+    if (c == EOF) break;
+  }
+  std::fclose(f);
+  return true;
+}
+
+// A path for comparing with the index: forward slashes; on Windows without case.
+std::string key(std::string s) {
+  for (char& c : s) {
+    if (c == '\\') c = '/';
+#ifdef _WIN32
+    c = (char)std::tolower((unsigned char)c);
+#endif
+  }
+  return s;
+}
+
+bool absolute(const std::string& s) {
+#ifdef _WIN32
+  return (s.size() > 1 && s[1] == ':') || (!s.empty() && (s[0] == '/' || s[0] == '\\'));
+#else
+  return !s.empty() && s[0] == '/';
+#endif
+}
+
+// A CMI name for a module the scan does not read (as g++-mapper-server -f gives one).
+std::string fallback_name(std::string n) {
+  for (char& ch : n)
+    if (ch == ':' || ch == '/' || ch == '\\') ch = '-';
+  return "gcm.cache/" + n + ".gcm";
+}
+
+// The header-unit map the index gives <source>, or "".
+std::string lookup(const std::string& index, std::string source) {
+  if (!absolute(source)) {
+    char buf[4096];
+#ifdef _WIN32
+    if (_getcwd(buf, sizeof buf)) source = std::string(buf) + "/" + source;
+#else
+    if (getcwd(buf, sizeof buf)) source = std::string(buf) + "/" + source;
+#endif
+  }
+  std::string want = key(source);
+  FILE* f = std::fopen(index.c_str(), "rb");
+  if (!f) return "";
+  std::string line, found;
+  int c;
+  for (;;) {
+    line.clear();
+    while ((c = std::fgetc(f)) != EOF && c != '\n')
+      if (c != '\r') line += (char)c;
+    size_t bar = line.find('|');
+    if (bar != std::string::npos && key(line.substr(0, bar)) == want) {
+      found = line.substr(bar + 1);
+      break;
+    }
+    if (c == EOF) break;
+  }
+  std::fclose(f);
+  return found;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -94,33 +188,35 @@ int main(int argc, char** argv) {
   _setmode(_fileno(stdin), _O_BINARY);    // GCC takes a "\r" as part of a word
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
-  if (argc != 2) {
-    std::fprintf(stderr, "usage: hu-mapper <map file>\n");
-    return 2;
-  }
-  std::string root = ".", exported;
-  std::set<std::string> textual;
-  std::map<std::string, std::string> units;
-  if (FILE* f = std::fopen(argv[1], "rb")) {
-    std::string line;
-    int c;
-    for (;;) {
-      line.clear();
-      while ((c = std::fgetc(f)) != EOF && c != '\n')
-        if (c != '\r') line += (char)c;
-      std::vector<std::string> w = words(line);
-      if (w.size() == 2 && w[0] == "$root") root = w[1];
-      else if (w.size() == 2 && w[0] == "$export") exported = w[1];
-      else if (w.size() == 2 && w[0] == "$textual") textual.insert(w[1]);
-      else if (w.size() == 2 && w[0][0] != '$') units[w[0]] = w[1];
-      if (c == EOF) break;
+  Maps m;
+  bool fallback = false;
+  std::string a1 = argc > 1 ? argv[1] : "";
+  if (argc == 2 && a1[0] != '-') {
+    if (!load(argv[1], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[1]);
+      return 2;
     }
-    std::fclose(f);
+  } else if (argc == 3 && a1 == "-s") {
+    fallback = true;
+    if (!load(argv[2], m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[2]);
+      return 2;
+    }
+  } else if (argc == 5 && a1 == "-c") {
+    load(argv[2], m);                       // (CMake writes it before the compile; none: no named modules)
+    std::string hu = lookup(argv[3], argv[4]);
+    if (!hu.empty() && !load(hu, m)) {
+      std::fprintf(stderr, "hu-mapper: cannot open %s\n", hu.c_str());
+      return 2;
+    }
   } else {
-    std::fprintf(stderr, "hu-mapper: cannot open %s\n", argv[1]);
+    std::fprintf(stderr, "usage: hu-mapper <map> | -s <map> | -c <modmap> <index> <source>\n");
     return 2;
   }
-
+  const std::string& root = m.root;
+  const std::string& exported = m.exported;
+  const std::set<std::string>& textual = m.textual;
+  const std::map<std::string, std::string>& units = m.units;
   std::string line;
   std::vector<std::vector<std::string>> block;
   while (read_line(line)) {
@@ -140,12 +236,24 @@ int main(int argc, char** argv) {
       } else if (cmd == "MODULE-REPO") {
         resp = "PATHNAME " + quote(root);
       } else if (cmd == "MODULE-EXPORT") {
-        resp = exported.empty() ? "ERROR " + quote("no CMI for " + arg) : "PATHNAME " + quote(exported);
+        // a header unit's own compile: the one CMI to write; a consumer: its named module, from CMake's module map
+        // (the scan: a fallback name)
+        auto it = units.find(arg);
+        resp = !exported.empty() ? "PATHNAME " + quote(exported)
+             : it != units.end() ? "PATHNAME " + quote(it->second)
+             : fallback          ? "PATHNAME " + quote(fallback_name(arg))
+                                 : "ERROR " + quote("no CMI for " + arg);
       } else if (cmd == "MODULE-COMPILED") {
         resp = "OK";
       } else if (cmd == "MODULE-IMPORT") {
         auto it = units.find(arg);
-        resp = it == units.end() ? "ERROR " + quote("unknown header unit " + arg) : "PATHNAME " + quote(it->second);
+        if (it != units.end()) {
+          resp = "PATHNAME " + quote(it->second);
+        } else if (fallback) {
+          resp = "PATHNAME " + quote(fallback_name(arg));
+        } else {
+          resp = "ERROR " + quote("unknown module " + arg);
+        }
       } else if (cmd == "INCLUDE-TRANSLATE") {
         auto it = units.find(arg);
         resp = textual.count(arg) ? "BOOL TRUE" : it != units.end() ? "PATHNAME " + quote(it->second) : "BOOL FALSE";

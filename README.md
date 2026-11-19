@@ -256,15 +256,19 @@ defined before the include take effect. Use it for the one source of an stb-styl
   generated wrapper whose only line is `#include "<header>"`, and its own mapper lists only the wrapper: the same
   effect without a program (GCC does not check a header unit's name when it reads the BMI, so consumers still name the
   header). Debug information is the same either way (the wrapper only adds an include level, no code).
-* Each consumer source gets a mapper (`g++-mapper-server`) listing its header units. GCC also translates `#include`s of
-  listed headers into imports.
+* Each consumer source gets a map listing its header units. GCC also translates `#include`s of listed headers into
+  imports. Sources with the same content share one map (`gcc-m/<hash>.map`).
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
-  header-unit map together.
+  header-unit map together: GCC starts `hu-mapper -c <module map> <index> <source>`, which reads both and finds the
+  source's map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. No shell or `cmd.exe` runs in
+  between, so paths may hold `, ; =` and the like (only blanks are excluded).
 * Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
   answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
-* On Windows (MinGW-w64) there is no `/bin/sh`, so the consumer mapper is a generated `gcc-mapper.cmd` run through
-  `cmd /c`; it finds the source's map in `src-index.txt`. Mapper files get short hashed names, because paths past 260
-  characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
+* Without `hu-mapper` (cross-compiling without a host compiler, or `HU_GCC_WRAPPERS`), consumers use GCC's
+  `g++-mapper-server` through a script: `gcc-mapper.sh`, or on Windows `gcc-mapper.cmd` run through `cmd /c` (which finds
+  the source's map in `src-index.txt`; there a build directory or source path with `& | < > ^ % , ; =` is rejected at
+  configure time). Mapper files get short hashed names, because paths past 260 characters do not open, and `\n` line
+  ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
 **Clang** (`cmake/HeaderUnits/Clang.cmake`) uses lazy, named header units (the Buck2 scheme):
 
@@ -345,7 +349,7 @@ defined before the include take effect. Use it for the one source of an stb-styl
 cmake/HeaderUnits.cmake          entry point: include(HeaderUnits)
 cmake/HeaderUnits/Core.cmake     add_header_units, target_import_header_units, finalization
 cmake/HeaderUnits/Common.cmake   header lookup, import scanning, usage requirements, compatibility check
-cmake/HeaderUnits/hu-mapper.cpp  GCC: the mapper of a header unit's own compile (built at configure time)
+cmake/HeaderUnits/hu-mapper.cpp  GCC: the module mapper of header units and consumers (built at configure time)
 cmake/HeaderUnits/Auto.cmake     target_auto_header_units
 cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
