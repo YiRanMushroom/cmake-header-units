@@ -4,7 +4,8 @@
 #   the set's object file, through hu-mapper (hu-mapper.cpp, built at configure time): it gives GCC the CMI to write and
 #   keeps every #include in the header textual, also one of the header itself (CMIs independent of build order).
 #   Cross-compiling (or HU_GCC_WRAPPERS ON), the header is compiled from a wrapper instead (_hu_gcc_wrapper).
-# * A consumer source gets a map of its header units (one per distinct content, found through hu-index.txt); GCC then
+# * A consumer source gets a map of its header units, with the spellings of every target that compiles it (one map per
+#   distinct content, found through hu-index.txt by source path); GCC then
 #   also translates an #include of a listed header into an import.  CMake's internal CMAKE_CXX_MODULE_MAP_FLAG is
 #   overridden so that the compile serves CMake's named-module map and the source's header-unit map together
 #   (CMAKE-INTERNAL): through hu-mapper ("-c"), or without it through a script (gcc-mapper.sh / gcc-mapper.cmd) and
@@ -335,16 +336,41 @@ macro(_hu_GCC_consumer_options)
         "on Windows and without hu-mapper the module mapper runs through cmd.exe, which splits or interprets them.")
     endif()
     get_property(srv GLOBAL PROPERTY _HU_GCC_SERVER)
-    # Keys by the consumer's own search list: which directory (and so which spelling) GCC uses is the consumer's.
-    string(MD5 tk "${t}")
-    if(NOT DEFINED _hu_cs_${tk}_DIRS)
-      _hu_target_search(_hu_cs_${tk} ${t})
-      string(MD5 _hu_cs_${tk}_KEY "${_hu_cs_${tk}_DIRS}|${_hu_cs_${tk}_RAW}")
+    # Keys by the search lists of every target that compiles this source: GCC names a header by the spelling of the
+    # include directory it was found in, which is each target's own, but a source has one map.  (Its scan gets the map
+    # through a source property, which is per directory: a second target of the directory gets the first one's; its
+    # compile finds the map through hu-index.txt by source path.)  The map holds the keys of all of them: a key is a
+    # spelling of the header's own path (_hu_gcc_keys), a header has one header unit per build tree, and a source has
+    # one set list (and one textual-includes marker), so a key of another target's names the same CMI.
+    if(NOT DEFINED _hu_gst_init)
+      set(_hu_gst_init 1)
+      foreach(_hu_tu IN LISTS tus)                   # the targets of every source, in order (Core.cmake's TUs)
+        string(FIND "${_hu_tu}" "|" _hu_bar)
+        string(SUBSTRING "${_hu_tu}" 0 ${_hu_bar} _hu_t)
+        math(EXPR _hu_bar "${_hu_bar} + 1")
+        string(SUBSTRING "${_hu_tu}" ${_hu_bar} -1 _hu_s)
+        string(MD5 _hu_sk "${_hu_s}")
+        list(APPEND _hu_gst_${_hu_sk} "${_hu_t}")
+      endforeach()
     endif()
-    # The map's content depends only on the search list and the sets, so it is computed once per such pair (not per
+    string(MD5 _hu_gsk "${src}")
+    set(_hu_gkeys)                                   # the distinct search lists of the source's targets
+    set(_hu_gtks)                                    # a target of each
+    foreach(_hu_t IN LISTS _hu_gst_${_hu_gsk})
+      string(MD5 tk "${_hu_t}")
+      if(NOT DEFINED _hu_cs_${tk}_DIRS)
+        _hu_target_search(_hu_cs_${tk} ${_hu_t})
+        string(MD5 _hu_cs_${tk}_KEY "${_hu_cs_${tk}_DIRS}|${_hu_cs_${tk}_RAW}")
+      endif()
+      if(NOT _hu_cs_${tk}_KEY IN_LIST _hu_gkeys)
+        list(APPEND _hu_gkeys "${_hu_cs_${tk}_KEY}")
+        list(APPEND _hu_gtks "${tk}")
+      endif()
+    endforeach()
+    # The map's content depends only on the search lists and the sets, so it is computed once per such pair (not per
     # source), and each header's keys once per search list: _hu_gcc_keys queries the file system.  (Variables of the
     # calling _hu_finalize_run, which runs once.)
-    string(MD5 _hu_gck "${_hu_cs_${tk}_KEY}|${tsets}")
+    string(MD5 _hu_gck "${_hu_gkeys}|${tsets}")
     if(NOT hu_textual AND DEFINED _hu_gc_${_hu_gck})
       set(content "${_hu_gc_${_hu_gck}}")
       list(APPEND deps ${_hu_gd_${_hu_gck}})
@@ -359,17 +385,35 @@ macro(_hu_GCC_consumer_options)
           if(hu_textual AND NOT p IN_LIST hu_only)
             continue()          # "HeaderUnits pragma: textual-includes": not imported by this source
           endif()
-          string(MD5 _hu_gkk "${_hu_cs_${tk}_KEY}|${p}|${h}")
-          if(NOT DEFINED _hu_gk_${_hu_gkk})
-            file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
-            _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
-            set(_hu_gk_${_hu_gkk} "")
-            foreach(kk IN LISTS pkeys)
-              _hu_gcc_line(l "${kk}" "${rc}")
-              string(APPEND _hu_gk_${_hu_gkk} "${l}")
+          set(_hu_gfirst TRUE)
+          foreach(tk IN LISTS _hu_gtks)
+            string(MD5 _hu_gkk "${_hu_cs_${tk}_KEY}|${p}|${h}")
+            if(NOT DEFINED _hu_gk_${_hu_gkk})
+              file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
+              _hu_gcc_keys(pkeys "${p}" "${h}" DIRS ${_hu_cs_${tk}_DIRS} RAW ${_hu_cs_${tk}_RAW})
+              set(_hu_gk_${_hu_gkk} "")
+              set(_hu_gkl_${_hu_gkk} "${pkeys}")
+              foreach(kk IN LISTS pkeys)
+                _hu_gcc_line(l "${kk}" "${rc}")
+                string(APPEND _hu_gk_${_hu_gkk} "${l}")
+              endforeach()
+            endif()
+            if(_hu_gfirst)
+              set(_hu_gfirst FALSE)
+              string(APPEND content "${_hu_gk_${_hu_gkk}}")
+              set(_hu_gseen "${_hu_gkl_${_hu_gkk}}")
+              continue()
+            endif()
+            # another search list: its keys that the ones before lack (the path and its real path are in every one's)
+            foreach(kk IN LISTS _hu_gkl_${_hu_gkk})
+              if(NOT kk IN_LIST _hu_gseen)
+                file(RELATIVE_PATH rc "${CMAKE_BINARY_DIR}" "${cmi}")
+                _hu_gcc_line(l "${kk}" "${rc}")
+                string(APPEND content "${l}")
+                list(APPEND _hu_gseen "${kk}")
+              endif()
             endforeach()
-          endif()
-          string(APPEND content "${_hu_gk_${_hu_gkk}}")
+          endforeach()
           list(APPEND _hu_gdeps "${cmi}")
         endforeach()
       endforeach()
@@ -393,13 +437,16 @@ macro(_hu_GCC_consumer_options)
       set(_hu_gw_${_hu_gmk} 1)
       _hu_write("${smap}" "$root .\n${content}" UNIX)
     endif()
-    string(MD5 _hu_gsk "${src}")
-    get_property(known GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk} SET)
+    # One index line per source: every directory computes the same map for it (above).
+    get_property(known GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk})
     if(NOT known)
-      set_property(GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk} 1)
+      set_property(GLOBAL PROPERTY _HU_GCC_HU_INDEXED_${_hu_gsk} "${smap}")
       # keyed by Ninja's $in (CMAKE-INTERNAL: the Ninja generator passes a compiled source by its absolute path, also
       # inside the build tree; t12 has such a source)
       set_property(GLOBAL APPEND_STRING PROPERTY _HU_GCC_HU_INDEX "${src}|${smap}\n")
+    elseif(NOT known STREQUAL smap)
+      message(FATAL_ERROR "HeaderUnits (internal): source '${src}' got two GCC header-unit maps ('${known}' for the "
+        "first of its targets, '${smap}' for ${t}).")
     endif()
     if(mapper)
       list(APPEND opts "-fmodule-mapper=|${mapper} -s ${smap}")
