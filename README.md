@@ -12,6 +12,7 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 |---|---|---|
 | GCC 16 + libstdc++ (Linux) | Ninja | this module |
 | Clang 22 + libstdc++ 16 (Linux) | Ninja | this module |
+| Clang 22 + libc++ 22 (Linux) | Ninja | this module |
 | Clang 22 (`clang++`, GNU-style driver) + MSVC STL (Windows) | Ninja | this module |
 | MSVC 19.44 (Windows) | Visual Studio 17 2022 | MSBuild (the commands do nothing) |
 | MinGW-w64 GCC 16.1 + libstdc++ (Windows) | Ninja | this module |
@@ -19,7 +20,7 @@ Status: prototype (November 2026). Tested with CMake 4.4.5 and 4.5.0 on:
 
 MinGW-w64 GCC is tested with CMake 4.5.0 and 4.3.1, MSVC with Ninja with CMake 4.5.0 (see Results).
 
-Not supported: clang-cl, libc++, multi-config generators with GCC/Clang/MSVC-Ninja.
+Not supported: clang-cl, multi-config generators with GCC/Clang/MSVC-Ninja.
 
 ## Quick start
 
@@ -346,6 +347,9 @@ defined before the include take effect. Use it for the one source of an stb-styl
   are caught by the compiler when it loads the BMI instead. Examples: a linked library's
   `INTERFACE_COMPILE_OPTIONS -std=...`, or generator expressions.
 * Clang itself marks header units experimental; the module silences `-Wexperimental-header-units`.
+* Clang with libc++ from the Debian or apt.llvm.org packages and CMake 4.5: the configure of every C++20 project fails,
+  with or without this module, unless `CMAKE_CXX_STDLIB_MODULES_JSON` names
+  `/usr/lib/llvm-<version>/lib/libc++.modules.json` (see Tests, How to run).
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
@@ -370,10 +374,10 @@ tests/t01..t21/                  test projects; tests/run_suite.cmake is the dri
 tests/attack/                    adversarial scenarios (run_attack.cmake, RESULTS.md)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
-run-linux.sh, run-win.bat        run the suite (GCC + Clang on Linux; clang++ + MSVC STL on Windows)
+run-linux.sh, run-win.bat        run the suite (Linux: GCC, Clang + libstdc++, Clang + libc++; Windows: clang++ + MSVC STL)
 run-msvc.bat                     build and run the test projects with MSVC and a Visual Studio generator
 run-msvc-ninja.bat               run the suite with MSVC and Ninja
-docker/                          the Linux toolchain image used for development (GCC 16, Clang 22, fmt, json, Boost)
+docker/                          the Linux toolchain image used for development (GCC 16, Clang 22 with libc++, fmt, json, Boost)
 docs/REPORT.md                   research report (in Chinese): CMake's position, compiler behaviour, prior art
 ```
 
@@ -426,8 +430,15 @@ For each test, `tests/run_suite.cmake` runs:
 
 How to run:
 
-* Linux: `sh run-linux.sh` runs GCC and Clang in parallel. Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS`,
-  `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on `/mnt/c`.
+* Linux: `sh run-linux.sh` runs GCC, Clang with libstdc++ and Clang with libc++ in parallel (`TC=gcc`, `clang` and
+  `libcxx`). Options: `CMAKE_EXE`, `CLANG_CXX`, `CLANG_FLAGS` (Clang with libstdc++), `LIBCXX_FLAGS` and
+  `LIBCXX_MODULES_JSON` (Clang with libc++), `TESTS="t01;t05"`. Build on a native Linux file system; under WSL, not on
+  `/mnt/c`. With libc++:
+  * the tests use fmt header-only, because the image's fmt library is compiled against libstdc++;
+  * the driver sets `CMAKE_CXX_STDLIB_MODULES_JSON` to `LIBCXX_MODULES_JSON` (default
+    `/usr/lib/llvm-22/lib/libc++.modules.json`). CMake 4.5 sets up `import std` for every C++20 target, from the
+    modules file that Clang names; in the image, that file's relative source paths resolve only from
+    `/usr/lib/llvm-22/lib`, so without the setting every configure fails.
 * Windows, clang++ + MSVC STL: `run-win.bat`. It needs clang++, ninja and cmake on PATH, and finds Visual Studio via
   vswhere. It also needs the fmt 10.1.1 and nlohmann_json 3.11.3 sources:
 
@@ -454,6 +465,18 @@ How to run:
   `tests/attack/RESULTS.md`.
 
 ## Results
+
+**2026-11-19, Linux, CMake 4.4.5 and 4.5.0** (the image of `docker/`, fresh build directories, `run-linux.sh`): t01-t21
+**63/63 PASS** with each CMake version, on GCC 16.2, Clang 22 + libstdc++ 16 and Clang 22 + libc++ 22 (`TC=libcxx`,
+new). The module needed no change for libc++. Before the tests used fmt header-only with libc++, the three tests that
+use fmt (t02, t08, t11) failed to link; with CMake 4.5.0 and without `CMAKE_CXX_STDLIB_MODULES_JSON`, every libc++
+test except t09 failed at configure (see How to run).
+
+`import std` with CMake 4.5.0 on Linux: a target that imports `std` and a header unit whose header includes `<string>`
+builds and runs with GCC 16.2, Clang 22 + libstdc++ and Clang 22 + libc++, as does the same target without header
+units. With Clang in the image, CMake finds the C++ library's modules file only when `CMAKE_CXX_STDLIB_MODULES_JSON`
+names it, with or without this module: for libstdc++ CMake asks `clang++ -print-file-name=libstdc++.modules.json`
+without `CMAKE_CXX_FLAGS`, so `--gcc-toolchain` does not apply and Clang names no file; for libc++ see How to run.
 
 **2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
 10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way
