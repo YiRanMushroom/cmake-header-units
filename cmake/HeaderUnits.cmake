@@ -13,8 +13,8 @@
 #   set(HU_ALLOW_HEADER_IMPORTS ON)   # experimental: header units whose headers import header units
 #
 # Toolchains:
-#   GCC 16 (libstdc++), Clang 22 (GNU-style driver; libstdc++ or the MSVC STL) and MSVC 19.40+ with the Ninja
-#   generator: the module builds the header units (HeaderUnits/GCC.cmake, Clang.cmake, MSVCNinja.cmake).
+#   GCC 16 (libstdc++), Clang 22 (clang++ with libstdc++ or the MSVC STL, clang-cl with the MSVC STL) and MSVC 19.40+
+#   with the Ninja generator: the module builds the header units (HeaderUnits/GCC.cmake, Clang.cmake, MSVCNinja.cmake).
 #   MSVC with a Visual Studio generator: MSBuild builds them; the commands do nothing (HeaderUnits/MSVC.cmake).
 #
 # Every place that relies on CMake internals or on undocumented CMake behaviour (unsupported, may break with any
@@ -47,8 +47,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
     message(WARNING "HeaderUnits: tested with GCC 16 only (found ${CMAKE_CXX_COMPILER_VERSION}).")
   endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
-  set(_HU_TC Clang)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT MATCHES "^(GNU|MSVC)$")
+  set(_HU_TC Clang)          # clang++ and clang-cl (the MSVC-style driver) alike
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 22)
     message(WARNING "HeaderUnits: tested with Clang 22 only (found ${CMAKE_CXX_COMPILER_VERSION}).")
   endif()
@@ -60,8 +60,8 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   endif()
 else()
   message(FATAL_ERROR "HeaderUnits: unsupported compiler '${CMAKE_CXX_COMPILER_ID}' "
-    "(frontend '${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}'). Supported: GCC, and Clang with the GNU-style driver "
-    "(clang++, not clang-cl), both with Ninja, and MSVC with a Visual Studio generator. clang-cl is not supported.")
+    "(frontend '${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}'). Supported: GCC, Clang (clang++ or clang-cl) and MSVC with "
+    "Ninja, and MSVC with a Visual Studio generator.")
 endif()
 set(_HU_DIR "${CMAKE_BINARY_DIR}/CMakeFiles/header_units")
 set_property(GLOBAL PROPERTY _HU_TC "${_HU_TC}")
