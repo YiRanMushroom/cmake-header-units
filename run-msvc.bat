@@ -10,6 +10,11 @@ setlocal EnableDelayedExpansion
 set "HERE=%~dp0"
 if not defined CMAKE_EXE for /f "delims=" %%i in ('where cmake.exe') do if not defined CMAKE_EXE set "CMAKE_EXE=%%i"
 if not defined HU_VS_GENERATOR set "HU_VS_GENERATOR=Visual Studio 17 2022"
+rem ctest of the CMake under test (next to it), else the first on PATH
+set "CTEST=ctest"
+for %%i in ("%CMAKE_EXE%") do if exist "%%~dpictest.exe" set "CTEST=%%~dpictest.exe"
+rem Known failures with MSBuild too (fmt's format_facet::do_put does not link through a header unit): XFAIL / XPASS
+set "KNOWN= t02_thirdparty t08_auto t11_transitive "
 if not defined TESTS set "TESTS=t01_stl t02_thirdparty t03_named_modules t05_rebuild t06_mixed t07_own_headers t08_auto t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma t15_scan_sources t16_deferred"
 set "OUT=%HERE%_build\msvc"
 if not exist "%OUT%" mkdir "%OUT%"
@@ -23,7 +28,8 @@ for %%t in (%TESTS%) do (
   set "V=PASS"
   "%CMAKE_EXE%" -S "!SRC!" -B "!B!" -G "%HU_VS_GENERATOR%" -A x64 > "!B!.log" 2>&1 || set "V=FAIL(configure)"
   if "!V!"=="PASS" "%CMAKE_EXE%" --build "!B!" --config Debug >> "!B!.log" 2>&1 || set "V=FAIL(build)"
-  if "!V!"=="PASS" ( pushd "!B!" & ctest -C Debug --output-on-failure >> "!B!.log" 2>&1 || set "V=FAIL(ctest)" & popd )
+  if "!V!"=="PASS" ( pushd "!B!" & "!CTEST!" -C Debug --output-on-failure >> "!B!.log" 2>&1 || set "V=FAIL(ctest)" & popd )
+  for %%n in ("!NAME!") do if not "!KNOWN: %%~n =!"=="!KNOWN!" ( if "!V!"=="PASS" ( set "V=XPASS" ) else set "V=XFAIL(!V:~5,-1!)" )
   echo msvc^|!NAME!^|!V!>> "%RES%"
   echo !V!  msvc  !NAME!
 )
