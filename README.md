@@ -428,7 +428,7 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t26/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+tests/t01..t27/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
@@ -486,6 +486,7 @@ Each test is a standalone CMake project with a one-line README:
 | t24_two_sets | one header in two sets of the same directory, each set imported by its own target (`<vector>`, and `<t24/val.h>`, which the second set spells `<val.h>`): GCC rejects the second set at configure time (one header unit per header per build tree); the other toolchains build four distinct BMIs, each consumer's compile gets only its own set's BMIs, and a deleted BMI is rebuilt alone with its consumer |
 | t25_shared_source | one source compiled by three targets that import the same set, each spelling the include directory differently (`a/../inc`; in one directory `b/../inc` and `b/../b/../inc`): every compile imports `<sh.h>` and translates `#include <sh2.h>` (GCC: checked in the depfiles) |
 | t26_shared_targets | one source compiled by a target that imports a set and, in another directory, by one that does not: a clean build of only the second builds no header unit and keeps the `#include` textual (depfile), also after an edit of the header |
+| t27_module_two_targets | one module interface source (importing `<vector>`) compiled by two targets of one directory, each imported by a program without header units of its own: both programs build and run (with MSVC each module target's importers need its header-unit mappings) |
 
 For each test, `tests/run_suite.cmake` runs:
 
@@ -540,85 +541,25 @@ How to run:
 
 ## Results
 
-**2026-11-19, the full matrix after native scanning, clang-cl, libc++, the MSVC toolchain stamp, GCC header paths with
-blanks, `import std` (t22) and Ninja Multi-Config (t23)** (fresh build directories, `tests/run_parallel.cmake`, every
-toolchain at the same time): Linux (the image of `docker/`) with CMake 4.5.0: GCC 16.2, Clang 22 + libstdc++ and
-Clang 22 + libc++ **23/23 PASS** each; with CMake 4.4.5: 22 PASS + t22 SKIP each. Windows 11 with CMake 4.5.0: clang++
-22.1.8 and clang-cl 22.1.8 (MSVC 19.44 STL) **23/23 PASS** each; MinGW-w64 GCC 16.1: 22 PASS + t02 XFAIL; MSVC 19.44
-with Ninja: 20 PASS + t02, t08, t11 XFAIL (fmt's `do_put`, see Limitations); t23 checks there that Ninja Multi-Config
-is rejected. With the parallel runner the Linux matrix (both CMake versions) took about 2 minutes, the Windows one
-about 5.5 minutes.
+The full matrix at `9e13e62` (2026-11-19; fresh build directories, `tests/run_parallel.cmake`; Linux in the image of
+`docker/`; Windows 11 with Visual Studio 2022 17.14 and Windows SDK 10.0.26100):
 
-**2026-11-19, Linux, CMake 4.4.5 and 4.5.0** (the image of `docker/`, fresh build directories, `run-linux.sh`): t01-t21
-**63/63 PASS** with each CMake version, on GCC 16.2, Clang 22 + libstdc++ 16 and Clang 22 + libc++ 22 (`TC=libcxx`,
-new). The module needed no change for libc++. Before the tests used fmt header-only with libc++, the three tests that
-use fmt (t02, t08, t11) failed to link; with CMake 4.5.0 and without `CMAKE_CXX_STDLIB_MODULES_JSON`, every libc++
-test except t09 failed at configure (see How to run).
+| toolchain | CMake 4.5.0 | CMake 4.4.5 |
+|---|---|---|
+| Linux, GCC 16.2 | 27/27 | 26 + t22 SKIP |
+| Linux, Clang 22 + libstdc++ 16 | 27/27 | 26 + t22 SKIP |
+| Linux, Clang 22 + libc++ 22 | 27/27 | 26 + t22 SKIP |
+| Windows, clang++ 22.1.8 + MSVC STL | 27/27 | |
+| Windows, clang-cl 22.1.8 + MSVC STL | 27/27 | |
+| Windows, MinGW-w64 GCC 16.1 | 26 + t02 XFAIL | |
+| Windows, MSVC 19.44 with Ninja | 24 + t02, t08, t11 XFAIL | |
+| Windows, MSVC 19.44 with MSBuild (`run-msvc.bat`: t01-t16 without t04, t09) | 11 + t02, t08, t11 XFAIL | |
 
-`import std` with CMake 4.5.0 on Linux: a target that imports `std` and a header unit whose header includes `<string>`
-builds and runs with GCC 16.2, Clang 22 + libstdc++ and Clang 22 + libc++, as does the same target without header
-units. With Clang in the image, CMake finds the C++ library's modules file only when `CMAKE_CXX_STDLIB_MODULES_JSON`
-names it, with or without this module: for libstdc++ CMake asks `clang++ -print-file-name=libstdc++.modules.json`
-without `CMAKE_CXX_FLAGS`, so `--gcc-toolchain` does not apply and Clang names no file; for libc++ see How to run.
-
-**2026-11-19, clang-cl, Windows 11, CMake 4.5.0** (fresh build directories; LLVM 22.1.8, Visual Studio 2022 17.14 with
-the MSVC 19.44 STL, Windows SDK 10.0.26100): clang-cl (`TC=clangcl`): 21/21 PASS. The changes for clang-cl also touch
-the header lookup and the compatibility check; after them, clang++ 22.1.8 (`TC=win`) passes t01, t04, t10, t14, t17
-and t19, and MSVC with Ninja (`TC=msvc`) passes t04. The other tests and toolchains were not rerun for these changes.
-
-**2026-11-19, GCC header paths with blanks; the shared maps without `hu-mapper`** (fresh build directories): GCC 16.2
-on Linux (CMake 4.4.5) and MinGW-w64 GCC 16.1 (CMake 4.5.0): t01, t03, t04, t10, t12, t14, t15, t17, t18 and t21 PASS,
-t21 with its headers in a directory with a space as well. The same tests except t21 also PASS with `HU_GCC_WRAPPERS` ON
-(a copy of the driver that adds the option), where consumers use the scripts and the shared maps. Clang 22 on Linux:
-t21 PASS. The other toolchains were not rerun.
-
-**2026-11-19, Windows 11, CMake 4.5.0** (fresh build directories; Visual Studio 2022 17.14 with MSVC 19.44, Windows SDK
-10.0.26100): MSVC with Ninja (`TC=msvc`): 18 PASS, and t02_thirdparty, t08_auto and t11_transitive fail the known way
-(XFAIL; fmt does not link through a header unit, as with MSBuild). clang++ 22.1.8 + MSVC STL (`TC=win`): 21/21 PASS.
-MinGW-w64 GCC 16.1 (`TC=mingw`): 20 PASS, t02_thirdparty XFAIL; with CMake 4.3.1 t03_named_modules passes as well (its
-#28166 probe needs CMake 4.4). The Linux toolchains were not rerun for these changes. Configure time of a project with
-40 targets, 1000 sources and 70 header units (MinGW GCC): 42.5 s before the per-search-list maps, 7.6 s after.
-
-**2026-11-19, after the lookup rework and GCC's hu-mapper** (fresh build directories): t01-t21 **63/63 PASS** on GCC
-16.2 and Clang 22 + libstdc++ (Linux, CMake 4.4.5) and clang++ + MSVC STL (Windows, CMake 4.5.0). MinGW-w64 GCC 16.1
-(`TC=mingw`, CMake 4.5.0): 20 PASS, and t02_thirdparty fails the known way (XFAIL; link: multiple definitions in fmt).
-t08_auto (fmt's self-include) and t12_build_tree (a header in the build tree), which failed there before, pass. With
-GCC, t21_self_include also covers the wrapper fallback (`HU_GCC_WRAPPERS`) and a cross build (an explicit
-`CMAKE_SYSTEM_NAME`: `hu-mapper` built by the host compiler). t19_scale: 5 and 40 targets both take 2 compiler runs
-for the header lookup at configure time (one lookup run plus the self-check).
-
-Earlier the same day, the header lookup without `try_compile`: configure time of t02_thirdparty (3 sets) on Windows
-with MinGW went from 11.7 s to 1.9 s, of which 1.4 s is CMake's own compiler detection.
-
-The table is the run before that change (2026-11-17, fresh build directories).
-
-GCC/Clang suite then: **96/96 PASS**, i.e. t01-t16 x {GCC 16, Clang 22 + libstdc++, clang++ + MSVC STL} x CMake {4.5.0, 4.4.5}.
-The last column is the MSVC pass-through (`run-msvc.bat`: MSVC 19.44, Visual Studio 17 2022, CMake 4.5.0; configure,
-build and ctest only).
-
-| test | gcc 4.5.0 | gcc 4.4.5 | clang 4.5.0 | clang 4.4.5 | win clang++ 4.5.0 | win clang++ 4.4.5 | MSVC (MSBuild) |
-|---|---|---|---|---|---|---|---|
-| t01_stl | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t02_thirdparty | PASS | PASS | PASS | PASS | PASS (no Boost) | PASS (no Boost) | FAIL (link, fmt) |
-| t03_named_modules | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t04_shared_set | PASS | PASS | PASS | PASS | PASS | PASS | skipped |
-| t05_rebuild | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t06_mixed | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t07_own_headers | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t08_auto | PASS | PASS | PASS | PASS | PASS | PASS | FAIL (link, fmt) |
-| t09_header_import_error | PASS | PASS | PASS | PASS | PASS | PASS | skipped |
-| t10_header_imports | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t11_transitive | PASS | PASS | PASS | PASS | PASS | PASS | FAIL (link, fmt) |
-| t12_build_tree | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t13_same_name | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t14_textual_pragma | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t15_scan_sources | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| t16_deferred | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-
-The three MSVC failures share one cause outside this module: fmt 10.1.1 in header-only mode, imported through a header
-unit that MSBuild builds, does not link with MSVC 19.44 (unresolved `fmt::format_facet<std::locale>::do_put`). A
-project without HeaderUnits.cmake shows the same: `#include <fmt/format.h>` links, `import <fmt/format.h>;` does not.
-
+* t22 (`import std`) needs CMake 4.5.
+* MinGW t02: fmt's function-local static arrays are reported as multiple definitions (see Limitations).
+* MSVC t02, t08, t11: fmt 10.1.1 header-only, imported through a header unit, does not link with MSVC 19.44 (unresolved
+  `fmt::format_facet<std::locale>::do_put`), with MSBuild too; a project without HeaderUnits.cmake shows the same:
+  `#include <fmt/format.h>` links, `import <fmt/format.h>;` does not.
 
 ## Background
 

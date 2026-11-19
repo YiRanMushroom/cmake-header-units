@@ -1,28 +1,29 @@
 +++
 title = "Status: where the work stands"
 +++
-Written 2026-11-19 at main f2767f7 (pushed), when the work moved to another machine. The `release` branch was updated from it (d1e83cc, the module of f2767f7) at the owner's word, before a full matrix; no new version tag was made (the last one is v0.1.0).
+Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.0. The `release` branch holds the module of f2767f7 (d1e83cc); not updated since.
 
-Since v0.1.0 (b0fc455), on main:
-- MSVC with Ninja: one header in two sets of one directory (t24). GCC: a shared source's map holds every target's spellings (t25); hu-index.txt describes the current configure also with no consumer left (t15); a target that does not import header units gets no map for a shared source (t26, hu-mapper version 3).
-- The compatibility check compares per-configuration flags and ABI definitions, also under Ninja Multi-Config (t04).
-- hu-mapper: an unreadable source is reported and not cached; non-ASCII paths on Windows (t01).
-- tools/update_release_branch.cmake passes update-ref the right old value. run-msvc.bat: ctest next to CMAKE_EXE, XFAIL for t02/t08/t11.
-- Test driver: NINJA_JOBS (-D or environment) limits each test's ninja. tests/attack is removed.
+What the owner wants (clarified 2026-11-19): "lean and fast" means: decide which features to support, write them mostly in one go, then adapt them bit by bit -- not dropping what should be supported. The owner keeps every feature: HU_ALLOW_HEADER_IMPORTS, the HU_GCC_WRAPPERS fallback, hu-mapper's import scan, Ninja Multi-Config, target_header_units_scan_sources. Known gaps are work to do (support them), not things to leave.
 
-Verified:
-- Full Windows matrix at a7106a5 (CMake 4.5.0): win 25/25, clangcl 25/25, msvc 22 PASS + XFAIL t02/t08/t11, mingw 24 PASS + XFAIL t02.
-- At f276251 (the t26 fix), targeted only: Linux GCC 16.2 t26, t25, t03, t12, t13, t15, t21, t23; win t26, t08, t15; clangcl, msvc, mingw t26; and t02, t04, t08 on win, clangcl, msvc, mingw, Linux gcc and Linux clang (PASS, or the known XFAILs).
-- NOT run since b0fc455: the full Linux matrix (gcc, clang, libcxx; libcxx not at all), CMake 4.4.5, the MSBuild pass-through (run-msvc.bat). Run the full matrix once: `release` already holds this code.
+Done since f2767f7:
+- Dead and duplicate code removed with no behaviour change (8e0ce15): build.ninja, maps, response files, hu-index.txt and manifests of t02, t04, t08 byte-identical before and after on mingw, win, clangcl, msvc.
+- MSVC with Ninja: a module interface source of two targets of one directory gives both targets' importers its header units (ae93aa5, t27; failed before with C7612).
+- Driver: t01's locked-source check works in a double-byte console code page (936).
+- README: Results is one table of the full matrix.
 
-Open work, in the order planned:
-1. Dead and duplicate code, no behaviour change (not started; an audit's findings, verify each by reading): (a) `_HU_SET_<set>_MAPLINES` is written in Core.cmake and never read, with code in GCC.cmake and Core.cmake that only feeds it; (b) the `_hu_<toolchain>_finish_set` hook is empty in all three toolchains; (c) the "header contains an import" check and message are twice in Core.cmake; (d) `_hu_search_base` reads CMAKE_CXX_FLAGS twice and records the self-check settings twice; (e) "write a file only when its content changed" is repeated in Clang.cmake, MSVCNinja.cmake and GCC.cmake. Check: run t02, t04, t08 before and after and compare the build trees' build.ninja, *.map, *.rsp and hu-index.txt byte for byte (same checkout path both times).
-2. The owner's decisions, asked and not yet answered (the owner wants less code; estimates from the audit): remove HU_ALLOW_HEADER_IMPORTS (experimental, ~190 lines, t10)? remove the HU_GCC_WRAPPERS fallback (~130 lines; the owner asked for it as the cross-compile fallback)? remove hu-mapper's own import scan and cache (~480 lines; CMake's scan stays; costs ~1.5 s per reconfigure at 1000 sources)? are Ninja Multi-Config (~75 lines, t23) and target_header_units_scan_sources (~40 lines, t15) used?
-3. README: the Results section is history (several dated paragraphs and an old table); replace it by one short table from the next full matrix.
-4. Suspected, not reproduced: MSVC with Ninja, a module interface unit compiled by two targets of one directory: the per-target interface options (the header units an importer of the module needs) are set only for the first target, because the toolchain macro runs once per (directory, source). Idea: set them in _hu_MSVC_consumers_done over Core.cmake's TUs.
-5. Known and left: Common.cmake compares CMAKE_CXX_FLAGS as whole strings, so a subdirectory that only adds -Wall fails the compatibility check; _hu_search_base ignores per-configuration flags under Ninja Multi-Config; MSVC with a non-ASCII build directory fails the configure self-check (cl prints /showIncludes in the console code page); HU_GCC_WRAPPERS with a build directory outside the ANSI code page fails; Auto.cmake and Common.cmake collect a target's sources by different rules (default module file set, generator expressions, build-directory fallback), unchecked which is right.
+Verified (full matrix, 2026-11-19, the table in README Results): Linux gcc/clang/libcxx 27/27 with CMake 4.5.0, 26 + t22 SKIP with 4.4.5; Windows win 27/27, clangcl 27/27, mingw 26 + XFAIL t02, msvc 24 + XFAIL t02/t08/t11; MSBuild (run-msvc.bat) 11 + XFAIL t02/t08/t11. (t01 on mingw/win/clangcl re-run after the driver fix.)
+
+In progress / open, in order:
+1. (A) The compatibility check compares CMAKE_CXX_FLAGS / CMAKE_CXX_FLAGS_<CONFIG> of the consumer's and the set's directories as whole strings: a directory that only adds -Wall fails. Compare without options that cannot change a BMI (warnings, diagnostics, debug info). Test: a t04 variant that must pass.
+2. (C) MSVC with a non-ASCII build directory: the configure self-check decodes cl's /showIncludes as UTF-8 (CMP0176); cl writes the ANSI code page (probed: ENCODING ANSI reads "é中" right on cp 936). Characters outside the ANSI code page cannot work with cl (it prints "?"). Then t01_non_ascii can run for msvc with a name in the ANSI code page.
+3. (B) Ninja Multi-Config: the header lookup ignores CMAKE_CXX_FLAGS_<CONFIG>; look up per configuration, use the result when all agree, stop with a message when they differ (t23). A subagent worked on it in a worktree.
+4. (E) Auto.cmake (_hu_auto_inputs) and Common.cmake (_hu_target_cxx_sources) collect a target's sources by different rules (default module file set, generator expressions, build-directory sources, extensions): one function. A subagent worked on it in a worktree.
+5. HU_GCC_WRAPPERS with a build directory outside the ANSI code page fails (g++-mapper-server and cmd scripts read narrow paths): check whether it can be supported.
+6. Ask the owner about a v0.1.1 tag and updating `release` once 1-4 are in.
 
 Learned while testing:
-- On a 16 GB machine, four suites at once froze it: one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5; Linux and Windows runs not at the same time.
-- `wsl -d <distro> -- bash script.sh "t01;t02"`: the ; ends the command that wsl.exe hands to the shell (exit 127, "t02: command not found"); pass commas and turn them into ; inside the script.
+- This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work (about 5 minutes). On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.
+- Docker Desktop may not be running ("open //./pipe/dockerDesktopLinuxEngine"): start "C:\Program Files\Docker\Docker\Docker Desktop.exe" and wait for `docker info`.
+- The driver reads child output in the console code page; with a double-byte one (936 here) non-ASCII paths in messages are garbled and can swallow a following "/": match messages loosely around them.
+- `wsl -d <distro> -- bash script.sh "t01;t02"`: the ; ends the command that wsl.exe hands to the shell (exit 127); pass commas and turn them into ; inside the script.
 - t26 on Linux GCC only fails without the fix when the two targets spell the include directory the same way; MinGW always.
