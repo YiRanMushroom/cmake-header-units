@@ -1,0 +1,1 @@
+t27: one module interface source (m.cppm, which imports <vector>) compiled by two targets of one directory, each imported by a program without header units of its own: both programs build and run (with MSVC, each module target's importers need its header-unit mappings).
