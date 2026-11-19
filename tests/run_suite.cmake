@@ -519,10 +519,9 @@ endfunction()
 function(t01_non_ascii)
   set(na "é中")
   if(TC STREQUAL "msvc")
-    # Not with MSVC (README, Limitations): cl prints /showIncludes in the ANSI code page ("中" becomes "?"), which the
-    # configure's self-check of the header lookup does not read as the path it predicts, also for "é".  The locked
-    # source is checked all the same.
-    set(na "ascii")
+    # cl prints /showIncludes in the ANSI code page: a character outside it comes out as "?" (README, Limitations).
+    # "é" is in the usual ones (1252, 936, ...).
+    set(na "é")
   endif()
   set(top "${ROOT}/t01-${na}")
   set(src "${top}/src-${na}")          # (no blank: GCC rejects a source or build path with one)
@@ -567,9 +566,16 @@ function(t01_non_ascii)
   if(NOT rc EQUAL 0)
     fail("non-ASCII directories: ctest failed")
   endif()
-  expect_noop("${b}" "non-ASCII directories")
+  set(noop ", 2nd build no-op")
+  if(TC STREQUAL "msvc")
+    # Not checked with MSVC: Ninja records cl's /showIncludes in the ANSI code page while build.ninja is UTF-8, so a
+    # header in a non-ASCII directory always looks missing -- a plain CMake project (C++20, no HeaderUnits) does the same.
+    set(noop " (no no-op check: CMake/Ninja rebuild cl's TUs in non-ASCII directories)")
+  else()
+    expect_noop("${b}" "non-ASCII directories")
+  endif()
   bail_if_failed()
-  evid("source and build directories named *-${na}: hu-mapper built, the scan finds <vector> and \"local.h\", build+run ok, 2nd build no-op; a source locked during a configure is reported, not cached, and its imports are found by the next one")
+  evid("source and build directories named *-${na}: hu-mapper built, the scan finds <vector> and \"local.h\", build+run ok${noop}; a source locked during a configure is reported, not cached, and its imports are found by the next one")
 endfunction()
 
 # MSVC: Ninja keeps no header of the C++ library in its dependencies; the header units depend on the compiler and on a
@@ -762,6 +768,20 @@ function(test_t04_shared_set bdir)
       fail("T04_BAD=${v}: configure did not fail with the expected message ('${want}')")
     endif()
   endforeach()
+  # A consumer directory that adds only warning and debug-information flags is compatible: configures and builds.
+  set(bb "${bdir}-warn")
+  file(REMOVE_RECURSE "${bb}")
+  run(rc out "${PROTO}" "${CMAKE_EXE}" -S "${PROTO}/tests/t04_shared_set" -B "${bb}" -G Ninja -DCMAKE_BUILD_TYPE=Debug
+      ${TC_ARGS} -DT04_WARN=ON)
+  if(rc EQUAL 0)
+    run(rc out "${bb}" ${NINJA} t04_warn)
+  endif()
+  if(NOT rc EQUAL 0)
+    first_lines(e "${out}" 3)
+    fail("a consumer directory that adds only warning / debug-information flags was rejected or does not build: ${e}")
+  else()
+    evid("a consumer directory adding only -Wall -Wextra (-g3 in Debug) / /W4 is accepted and builds;")
+  endif()
   # Ninja Multi-Config (MSVC rejects it): every configuration is compared, and the message names it.  A consumer-only
   # _ITERATOR_DEBUG_LEVEL=0 (MSVC STL) differs in Debug only: 0 is the default of the other configurations.
   if(NOT TC STREQUAL "msvc")

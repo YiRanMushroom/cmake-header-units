@@ -430,8 +430,9 @@ function(_hu_self_check)
   if(tc STREQUAL "MSVC")
     # cl: /showIncludes names each opened header on stdout ("<prefix><path>", one more blank per nesting level), with
     # CMake's detected (localized) prefix; /Zs: syntax check only, no preprocessed output.
+    # cl prints in the ANSI code page (a path outside it comes out with "?", which no lookup can match).
     set(cmd "${CMAKE_CXX_COMPILER}" /nologo ${args} /Zs /showIncludes "${src}")
-    execute_process(COMMAND ${cmd} OUTPUT_VARIABLE err ERROR_VARIABLE err RESULT_VARIABLE rc)
+    execute_process(COMMAND ${cmd} OUTPUT_VARIABLE err ERROR_VARIABLE err RESULT_VARIABLE rc ENCODING ANSI)
   else()
     set(hflag -H)
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -769,10 +770,11 @@ endfunction()
 # sets it receives (an import of <h> would fail; a #include stays textual).  A consumer that also has a header unit
 # of its own file is fine (e.g. a reused set brings another <config.h>, unused here).
 # Writes <path> with <content>, rewritten only when the content changes; UNIX: "\n" line ends; ONCE: a file named by its
-# content, written at most once per configure run.  In a multi-config build tree (_HU_CFG) <path> and <content> contain
+# content, written at most once per configure run; BOM: with a UTF-8 byte order mark (cl reads a response file without
+# one in the ANSI code page, so a non-ASCII path in it would name another file).  In a multi-config build tree (_HU_CFG) <path> and <content> contain
 # $<CONFIG>: one file per configuration (file(GENERATE)).
 function(_hu_write path content)
-  cmake_parse_arguments(A "UNIX;ONCE" "" "" ${ARGN})
+  cmake_parse_arguments(A "UNIX;ONCE;BOM" "" "" ${ARGN})
   if(A_ONCE)
     string(MD5 k "${path}")
     get_property(done GLOBAL PROPERTY _HU_WROTE_${k} SET)
@@ -780,6 +782,10 @@ function(_hu_write path content)
       return()
     endif()
     set_property(GLOBAL PROPERTY _HU_WROTE_${k} 1)
+  endif()
+  if(A_BOM)
+    string(ASCII 239 187 191 bom)
+    string(PREPEND content "${bom}")
   endif()
   set(nl)
   if(A_UNIX)
@@ -935,6 +941,22 @@ function(_hu_cfg_label out cfgs)
   endif()
 endfunction()
 
+# The options of a flags string (CMAKE_CXX_FLAGS...) that can change a header unit: all but warning, diagnostic and
+# debug-information options (a directory that adds -Wall stays compatible).
+function(_hu_bmi_flags out str)
+  separate_arguments(toks NATIVE_COMMAND "${str}")
+  set(r)
+  foreach(x IN LISTS toks)
+    if((x MATCHES "^-(W|w$|pedantic|fdiagnostics|f(no-)?color-diagnostics|fmessage-length)" AND NOT x MATCHES "^-W[apl],")
+       OR x MATCHES "^-g([0-3]|gdb[0-3]?|dwarf.*|split-dwarf|line-tables-only|column-info|z.*)?$"
+       OR x MATCHES "^[-/](W[0-4]|Wall|WX-?|w[0-4deo][0-9]*|external:W[0-4]|diagnostics:.*|nologo|Z[i7I]|FS)$")
+      continue()
+    endif()
+    list(APPEND r "${x}")
+  endforeach()
+  set(${out} "${r}" PARENT_SCOPE)
+endfunction()
+
 function(_hu_check_compat consumer set)
   get_property(std GLOBAL PROPERTY _HU_SET_${set}_STD)
   get_property(ext GLOBAL PROPERTY _HU_SET_${set}_EXT)
@@ -1033,7 +1055,9 @@ function(_hu_check_compat consumer set)
   foreach(v IN LISTS vars)
     get_directory_property(a DIRECTORY "${cdir}" DEFINITION ${v})
     get_directory_property(b DIRECTORY "${sdir}" DEFINITION ${v})
-    if(NOT a STREQUAL b)
+    _hu_bmi_flags(fa "${a}")
+    _hu_bmi_flags(fb "${b}")
+    if(NOT fa STREQUAL fb)
       set(in "")
       foreach(cfg IN LISTS cfgs)
         string(TOUPPER "${cfg}" ucfg)

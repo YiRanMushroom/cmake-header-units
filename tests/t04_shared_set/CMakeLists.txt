@@ -41,6 +41,11 @@ elseif(T04_BAD STREQUAL "dup")
   target_import_header_units(t04_bad hu_dup)
 endif()
 
+option(T04_WARN "add a consumer whose directory adds only warning / debug-information flags (compatible)" OFF)
+if(T04_WARN)
+  add_subdirectory(warnflags)
+endif()
+
 enable_testing()
 add_test(NAME t04_a COMMAND t04_a)
 add_test(NAME t04_b COMMAND t04_b)

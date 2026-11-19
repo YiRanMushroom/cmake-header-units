@@ -390,7 +390,8 @@ scheme):
 * The lookup takes a target's own `target_include_directories(SYSTEM ...)` directory for an `-I` one (CMake does not
   expose the difference at configure time); it matters only if a later `-I` directory has a header of the same name.
 * The consumer/set compatibility check compares `CMAKE_CXX_FLAGS` and the configuration's `CMAKE_CXX_FLAGS_<CONFIG>` of the
-  consumer's and the set's directories as whole strings, and the ABI-affecting definitions; under Ninja Multi-Config
+  consumer's and the set's directories without warning, diagnostic and debug-information options (a directory that adds
+  `-Wall`, `-g3` or `/W4` stays compatible), and the ABI-affecting definitions; under Ninja Multi-Config
   for every entry of `CMAKE_CONFIGURATION_TYPES`, including configurations that are never built (the error names the
   configuration). Definitions inside generator expressions are not compared.
 * The consumer/set compatibility check reads target and directory properties. Flags that only exist at generate time
@@ -407,8 +408,11 @@ scheme):
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
     (`format_facet<std::locale>::do_put` unresolved; see Tests);
-  * with Ninja, a build directory with non-ASCII characters fails the configure's header-lookup self-check: cl prints
-    `/showIncludes` in the console code page (a character outside it becomes `?`). It works after `chcp 65001`;
+  * with Ninja, a build directory with a character outside the ANSI code page fails the configure's header-lookup
+    self-check: cl prints `/showIncludes` in the ANSI code page, where it becomes `?` (characters in it, e.g. "é", work;
+    the module writes its response files with a UTF-8 byte order mark, which cl then reads as UTF-8). In a non-ASCII
+    directory every build recompiles the TUs whose headers are there, also without this module: Ninja records cl's
+    `/showIncludes` in the ANSI code page while CMake writes build.ninja in UTF-8;
   * with Ninja, Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency
     records (for every MSVC compile, not only header units). The header units depend on the compiler and on the
     `INCLUDE` environment variable instead (see How it works), so a changed `INCLUDE` takes effect at the next CMake
@@ -460,10 +464,10 @@ Each test is a standalone CMake project with a one-line README:
 
 | test | what it covers |
 |---|---|
-| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable; on Windows also a `target_auto_header_units` project in directories named `*-é中` (MSVC: `*-ascii`), first configured with its source locked: the lock is reported and not cached, and `hu-mapper` serves GCC from non-ASCII paths |
+| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable; on Windows also a `target_auto_header_units` project in directories named `*-é中` (MSVC: `*-é`), first configured with its source locked: the lock is reported and not cached, and `hu-mapper` serves GCC from non-ASCII paths |
 | t02_thirdparty | fmt + nlohmann_json (+ Boost on Linux) + STL header units in one TU; overlapping sets; GCC build-order independence |
 | t03_named_modules | named modules with `export import <vector>`; cross-target importers, including CMake's synthesized BMI targets |
-| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, a consumer directory's own `CMAKE_CXX_FLAGS_DEBUG`, duplicate header) are rejected at configure time; the flags and ABI cases also under Ninja Multi-Config, with the configuration named in the message (Debug only for `_ITERATOR_DEBUG_LEVEL=0` with the MSVC STL) |
+| t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, a consumer directory's own `CMAKE_CXX_FLAGS_DEBUG`, duplicate header) are rejected at configure time; the flags and ABI cases also under Ninja Multi-Config, with the configuration named in the message (Debug only for `_ITERATOR_DEBUG_LEVEL=0` with the MSVC STL); a consumer directory that adds only warning / debug-information flags is accepted and builds |
 | t05_rebuild | no-op build; touching or same-size edits of headers rebuild BMIs before consumers |
 | t06_mixed | header units and textual `#include` of overlapping headers in one TU, in every order; a TU excluded via `SOURCES` |
 | t07_own_headers | the project's own headers (in-tree library, local header) as header units; `#include` of them is translated |

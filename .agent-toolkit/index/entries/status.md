@@ -14,14 +14,14 @@ Done since f2767f7:
 Verified (full matrix, 2026-11-19, the table in README Results): Linux gcc/clang/libcxx 27/27 with CMake 4.5.0, 26 + t22 SKIP with 4.4.5; Windows win 27/27, clangcl 27/27, mingw 26 + XFAIL t02, msvc 24 + XFAIL t02/t08/t11; MSBuild (run-msvc.bat) 11 + XFAIL t02/t08/t11. (t01 on mingw/win/clangcl re-run after the driver fix.)
 
 In progress / open, in order:
-1. (A) The compatibility check compares CMAKE_CXX_FLAGS / CMAKE_CXX_FLAGS_<CONFIG> of the consumer's and the set's directories as whole strings: a directory that only adds -Wall fails. Compare without options that cannot change a BMI (warnings, diagnostics, debug info). Test: a t04 variant that must pass.
-2. (C) MSVC with a non-ASCII build directory: the configure self-check decodes cl's /showIncludes as UTF-8 (CMP0176); cl writes the ANSI code page (probed: ENCODING ANSI reads "é中" right on cp 936). Characters outside the ANSI code page cannot work with cl (it prints "?"). Then t01_non_ascii can run for msvc with a name in the ANSI code page.
+1. Done: (A) the compatibility check compares the directories' flags without warning, diagnostic and debug-information options (t04 variant T04_WARN, passes on mingw, win, clangcl, msvc, Linux gcc/clang/libcxx). (C) MSVC in a non-ASCII directory: the self-check reads cl's /showIncludes with ENCODING ANSI, and MSVC response files are written with a UTF-8 byte order mark (cl then reads them as UTF-8; without one as ANSI); t01's non-ASCII project runs for msvc as "*-é" (configure, build, run). Left, outside the module: Ninja records cl's /showIncludes in the ANSI code page while build.ninja is UTF-8, so in a non-ASCII directory every build recompiles -- a plain CMake project (cl, C++20, no HeaderUnits) does the same; a character outside the ANSI code page cannot work with cl.
 3. (B) Ninja Multi-Config: the header lookup ignores CMAKE_CXX_FLAGS_<CONFIG>; look up per configuration, use the result when all agree, stop with a message when they differ (t23). A subagent worked on it in a worktree.
 4. (E) Auto.cmake (_hu_auto_inputs) and Common.cmake (_hu_target_cxx_sources) collect a target's sources by different rules (default module file set, generator expressions, build-directory sources, extensions): one function. A subagent worked on it in a worktree.
 5. HU_GCC_WRAPPERS with a build directory outside the ANSI code page fails (g++-mapper-server and cmd scripts read narrow paths): check whether it can be supported.
 6. Ask the owner about a v0.1.1 tag and updating `release` once 1-4 are in.
 
 Learned while testing:
+- Every wait has a timeout of at most 3 minutes, longer work is checked again every 3 minutes (instructions.project).
 - This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work (about 5 minutes). On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.
 - Docker Desktop may not be running ("open //./pipe/dockerDesktopLinuxEngine"): start "C:\Program Files\Docker\Docker\Docker Desktop.exe" and wait for `docker info`.
 - The driver reads child output in the console code page; with a double-byte one (936 here) non-ASCII paths in messages are garbled and can swallow a following "/": match messages loosely around them.
