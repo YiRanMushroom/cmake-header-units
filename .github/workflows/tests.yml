@@ -58,13 +58,18 @@ jobs:
             _build/${{ matrix.tc }}-ci/logs/
 
   windows:
-    name: Windows ${{ matrix.tc }}
-    runs-on: windows-2025
+    name: Windows ${{ matrix.tc }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        tc: [msvc, win, clangcl, mingw]
+        include:     # windows-2025: Visual Studio 2026 (MSVC 19.52); windows-2022: Visual Studio 2022 (MSVC 19.44)
+          - { tc: msvc, os: windows-2025 }
+          - { tc: msvc, os: windows-2022 }
+          - { tc: win, os: windows-2025 }
+          - { tc: clangcl, os: windows-2025 }
+          - { tc: mingw, os: windows-2025 }
     env:
       CMAKE_VERSION: 4.5.0
       LLVM_VERSION: 22.1.8
@@ -97,6 +102,8 @@ jobs:
         run: |
           curl.exe -fsSL -o "$env:RUNNER_TEMP\mingw.zip" "https://github.com/brechtsanders/winlibs_mingw/releases/download/$env:WINLIBS"
           Expand-Archive "$env:RUNNER_TEMP\mingw.zip" 'C:\mingw-ci'
+          # (winlibs' own ninja.exe cannot enter a directory outside the ANSI code page: the pip one is used)
+          Remove-Item 'C:\mingw-ci\mingw64\bin\ninja.exe' -ErrorAction SilentlyContinue
           'C:\mingw-ci\mingw64\bin' | Out-File -Append $env:GITHUB_PATH
           "TC_EXTRA=-DMINGW_CXX=C:/mingw-ci/mingw64/bin/g++.exe" | Out-File -Append $env:GITHUB_ENV
       - uses: ilammy/msvc-dev-cmd@v1
@@ -114,7 +121,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-${{ matrix.tc }}
+          name: windows-${{ matrix.tc }}-${{ matrix.os }}
           path: |
             _build/${{ matrix.tc }}-ci/results.txt
             _build/${{ matrix.tc }}-ci/logs/
