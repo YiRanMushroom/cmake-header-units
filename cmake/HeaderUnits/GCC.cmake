@@ -14,15 +14,13 @@
 # * Mapper files spell CMIs relative to the top build dir ("$root ."), so depfiles name the same Ninja nodes, and are
 #   written with "\n" line ends (NEWLINE_STYLE UNIX): GCC's mapper-file reader takes a "\r" as part of a word.  For
 #   hu-mapper a path with a blank or a quote is quoted as in GCC's protocol (_hu_gcc_line); GCC's own reader has no
-#   quoting, so without hu-mapper a header path must not contain blanks.
+#   quoting, so without hu-mapper a header path must not contain blanks.  GCC splits the -fmodule-mapper option at blanks:
+#   with hu-mapper it names only files relative to the top build dir, and the compile's source comes from the scan's
+#   depfile (hu-mapper.cpp, source_of), so source and build directories may contain blanks.
 #
 # The macros below run in the scope of the Core.cmake function that calls them (cmake_language(CALL _hu_GCC_...)).
 
 include_guard(GLOBAL)
-
-if(_HU_DIR MATCHES "[ \t]")
-  message(FATAL_ERROR "HeaderUnits: with GCC the build directory must not contain spaces (GCC's module-mapper file parser cannot handle them).")
-endif()
 
 execute_process(COMMAND "${CMAKE_CXX_COMPILER}" -print-prog-name=g++-mapper-server
                 OUTPUT_VARIABLE _hu_srv OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -37,7 +35,27 @@ get_property(_hu_mapper GLOBAL PROPERTY _HU_HELPER)
 if(HU_GCC_WRAPPERS)
   set(_hu_mapper "")
 endif()
+# GCC splits its -fmodule-mapper option at blanks, with no quoting.  hu-mapper and the maps and index it gets are named
+# relative to the top build directory, the working directory of every Ninja command, so that the build directory may
+# contain blanks (_HU_GCC_MAPPER is that spelling, "./CMakeFiles/header_units/hu-mapper"; _hu_gcc_rel for the files).
+if(_hu_mapper)
+  cmake_path(IS_PREFIX CMAKE_BINARY_DIR "${_hu_mapper}" NORMALIZE _hu_in)
+  if(_hu_in)
+    file(RELATIVE_PATH _hu_mapper "${CMAKE_BINARY_DIR}" "${_hu_mapper}")
+    set(_hu_mapper "./${_hu_mapper}")
+  endif()
+  if(_hu_mapper MATCHES "[ \t]")
+    message(FATAL_ERROR "HeaderUnits: with GCC, hu-mapper's path '${_hu_mapper}' must not contain blanks (GCC splits "
+      "its module-mapper option at blanks).")
+  endif()
+  unset(_hu_in)
+endif()
 set_property(GLOBAL PROPERTY _HU_GCC_MAPPER "${_hu_mapper}")
+if(NOT _hu_mapper AND _HU_DIR MATCHES "[ \t]")
+  message(FATAL_ERROR "HeaderUnits: with GCC and without hu-mapper (HU_GCC_WRAPPERS, or cross-compiling without a host "
+    "compiler) the build directory must not contain blanks: GCC splits its module-mapper option at blanks, and its own "
+    "mapper-file reader has no quoting (found '${_HU_DIR}').")
+endif()
 get_property(_hu_cfg GLOBAL PROPERTY _HU_CFG)
 if(_hu_cfg AND NOT _hu_mapper)
   message(FATAL_ERROR "HeaderUnits: with GCC and Ninja Multi-Config, hu-mapper is required (not HU_GCC_WRAPPERS, and a "
@@ -136,9 +154,10 @@ endif()
 # (observed): CMake's modmap is the object path plus ".modmap", and $out is the object alone (BMIs are dyndep outputs).
 # With hu-mapper no shell or cmd.exe runs in between.  Ninja Multi-Config: hu-index.txt per configuration, named with
 # the Ninja variable CONFIG of the compile edge (CMAKE-INTERNAL, observed: CMake's multi-config edges set it).
-set(_hu_index "${_HU_DIR}/hu-index.txt")
+file(RELATIVE_PATH _hu_rdir "${CMAKE_BINARY_DIR}" "${_HU_DIR}")
+set(_hu_index "${_hu_rdir}/hu-index.txt")
 if(_hu_cfg)
-  set(_hu_index "${_HU_DIR}/$CONFIG/hu-index.txt")
+  set(_hu_index "${_hu_rdir}/$CONFIG/hu-index.txt")
 endif()
 # The compile rule reads hu-index.txt whenever this file is included, but _hu_finalize (_hu_GCC_consumers_done) writes it
 # only when a header-unit command ran.  Removed at the start of every configure, so that none is left from a previous
@@ -154,13 +173,15 @@ if(_hu_cfg)
 else()
   file(REMOVE "${_HU_DIR}/hu-index.txt")
 endif()
+# hu-mapper finds the compile's source from the module map's path (source_of: CMake's scan depfile next to it), not from
+# $in: GCC splits its mapper option at blanks, and $in is the source's absolute path, which may contain them.
 if(_hu_mapper AND CMAKE_HOST_WIN32)
   string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
-         "\"-fmodule-mapper=|${_hu_mapper} -c $out.modmap ${_hu_index} $in\""
+         "\"-fmodule-mapper=|${_hu_mapper} -c $out.modmap ${_hu_index}\""
          CMAKE_CXX_MODULE_MAP_FLAG "${_hu_old}")
 elseif(_hu_mapper)
   string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
-         "'-fmodule-mapper=|${_hu_mapper} -c <MODULE_MAP_FILE> ${_hu_index} $in'"
+         "'-fmodule-mapper=|${_hu_mapper} -c $out.modmap ${_hu_index}'"
          CMAKE_CXX_MODULE_MAP_FLAG "${_hu_old}")
 elseif(CMAKE_HOST_WIN32)
   string(REPLACE "-fmodule-mapper=<MODULE_MAP_FILE>"
@@ -178,6 +199,7 @@ unset(_hu_cfg)
 unset(_hu_index)
 unset(_hu_srv)
 unset(_hu_mapper)
+unset(_hu_rdir)
 
 # A line of a map file from its words (ARGN).  hu-mapper reads words as GCC's protocol spells them, so for it a word
 # with a blank or a quote is quoted ('...', with \\ and \' escaped); GCC's own reader (without hu-mapper) has no
@@ -306,7 +328,14 @@ macro(_hu_GCC_add_header)
     if(mapper)
       set(hsrc "${p}")
       _hu_gcc_self_lines(hlines "${p}" "${h}" "${rcmi}" DIRS ${S_DIRS} RAW ${S_RAW})
-      set(mopt "-fmodule-mapper=|${mapper} ${hmap}")
+      _hu_gcc_rel(rhmap "${hmap}")
+      if(rhmap MATCHES "[ \t]")                    # (a set or header name with a blank: hu-mapper's option splits)
+        string(MD5 hh "${p}")
+        string(SUBSTRING "${hh}" 0 16 hh)
+        set(hmap "${hudir}/gcc/${cfg}${hh}.map")
+        _hu_gcc_rel(rhmap "${hmap}")
+      endif()
+      set(mopt "-fmodule-mapper=|${mapper} ${rhmap}")
     else()
       _hu_gcc_wrapper(hsrc wkeys "${hudir}" "${p}")
       set(hlines "$root .\n")
@@ -385,12 +414,20 @@ function(_hu_gcc_objdir out t)
   set(${out} "${od}" PARENT_SCOPE)
 endfunction()
 
+# A file of the build tree (the top build dir is the working directory of every Ninja command) as an option of hu-mapper
+# gets it: relative to the top build dir, as GCC splits its mapper option at blanks.
+function(_hu_gcc_rel out path)
+  file(RELATIVE_PATH rel "${CMAKE_BINARY_DIR}" "${path}")
+  set(${out} "${rel}" PARENT_SCOPE)
+endfunction()
+
 # _hu_finalize(), per consumer source: in: t, src, tsets, hudir; appends opts and deps.
 macro(_hu_GCC_consumer_options)
-    if(src MATCHES "[ \t]")
-      message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains a space; GCC's mapper cannot express it.")
-    endif()
     get_property(mapper GLOBAL PROPERTY _HU_GCC_MAPPER)
+    if(NOT mapper AND src MATCHES "[ \t]")
+      message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains a blank; without hu-mapper "
+        "(HU_GCC_WRAPPERS, or cross-compiling without a host compiler) GCC's mapper cannot express it.")
+    endif()
     if(NOT mapper AND CMAKE_HOST_WIN32 AND src MATCHES "[&|<>^%,;=]")
       message(FATAL_ERROR "target_import_header_units(${t}): source path '${src}' contains one of & | < > ^ % , ; =; with GCC "
         "on Windows and without hu-mapper the module mapper runs through cmd.exe, which splits or interprets them.")
@@ -517,7 +554,8 @@ macro(_hu_GCC_consumer_options)
         "first of its targets, '${smap}' for ${t}).")
     endif()
     if(mapper)
-      list(APPEND opts "-fmodule-mapper=|${mapper} -s ${smap}")
+      _hu_gcc_rel(rsmap "${smap}")
+      list(APPEND opts "-fmodule-mapper=|${mapper} -s ${rsmap}")
     else()
       list(APPEND opts "-fmodule-mapper=|${srv} -f - ${smap}")
     endif()

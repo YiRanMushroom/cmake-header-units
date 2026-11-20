@@ -308,17 +308,20 @@ defined before the include take effect. Use it for the one source of an stb-styl
   without importing header units finds no line for its object directory: its `#include`s stay textual and its build
   needs no header unit. Sources with the same content share one map (`gcc-m/<hash>.map`).
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
-  header-unit map together: GCC starts `hu-mapper -c <module map> <index> <source>`, which reads both and finds the
-  source's map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. No shell or `cmd.exe` runs in
-  between, so paths may hold `, ; =` and the like. A header path may also hold blanks: `hu-mapper` reads its map
-  entries quoted as in GCC's protocol. Source paths and the build directory may not.
+  header-unit map together: GCC starts `hu-mapper -c <module map> <index>`, which reads both and finds the source's
+  map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. GCC splits that option at blanks, with no
+  quoting, so `hu-mapper` and its files are named relative to the top build directory (the working directory of every
+  Ninja command), and the source is not on it: `hu-mapper` reads it from the scan's depfile next to the module map
+  (`<object>.ddi.d`, its first prerequisite). No shell or `cmd.exe` runs in between, so paths may hold `, ; =`, blanks
+  and the like; `hu-mapper` reads its map entries quoted as in GCC's protocol. Only the object directory of a target
+  (its binary directory below the build tree) may not hold blanks: it is part of the module map's path.
 * Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
   answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
 * Without `hu-mapper` (cross-compiling without a host compiler, or `HU_GCC_WRAPPERS`), consumers use GCC's
   `g++-mapper-server` through a script: `gcc-mapper.sh`, or on Windows `gcc-mapper.cmd` run through `cmd /c` (there a
   build directory or source path with `& | < > ^ % , ; =` is rejected at configure time). The script finds the source's
   map in `hu-index.txt`, so the maps are the same shared ones. GCC's own mapper-file reader has no quoting, so a header
-  path with blanks is rejected at configure time. Mapper files get short hashed names, because paths past 260
+  path, source path or build directory with blanks is rejected at configure time. Mapper files get short hashed names, because paths past 260
   characters do not open, and `\n` line ends, because GCC's mapper-file reader takes a `\r` as part of a word.
 
 **Clang**, `clang++` and `clang-cl` (`cmake/HeaderUnits/Clang.cmake`), uses lazy, named header units (the Buck2
@@ -365,9 +368,10 @@ scheme):
 
 **CMake internals relied upon** (unsupported; grep `CMAKE-INTERNAL` in `cmake/`):
 
-1. GCC: the `CMAKE_CXX_MODULE_MAP_FLAG` override, with Ninja's `$in` injected into it. The module stops with an error if
-   a CMake release changes the template. On Windows the override also names CMake's module map as `$out.modmap`
-   (observed: the object path plus `.modmap`), since CMake spells `<MODULE_MAP_FILE>` with backslashes there.
+1. GCC: the `CMAKE_CXX_MODULE_MAP_FLAG` override (without `hu-mapper`, with Ninja's `$in` injected into it). The module
+   stops with an error if a CMake release changes the template. The override names CMake's module map as `$out.modmap`
+   (observed: the object path plus `.modmap`; CMake spells `<MODULE_MAP_FILE>` with backslashes on Windows), and
+   `hu-mapper` reads the source from the scan's depfile `<object>.ddi.d` (observed: its first prerequisite).
 2. The object location `<set binary dir>/CMakeFiles/<set>.dir/<OBJECT_NAME><ext>`, i.e. the default
    `CMAKE_INTERMEDIATE_DIR_STRATEGY` (`SHORT` is rejected); `clang-cl` is told to write the BMI there. If CMake moved
    objects, Ninja would stop with "missing and no known rule": a loud failure, never a silent misbuild.
@@ -389,7 +393,9 @@ scheme):
   * BMIs cannot be moved to another location.
 * GCC:
   * one header unit per header per build tree;
-  * no blanks in source paths or the build directory, and without `hu-mapper` none in header paths;
+  * with `hu-mapper` (the default), blanks work in source, header and build directory paths, but not in the binary
+    directory of a target below the build tree (an `add_subdirectory` with a blank: rejected at configure time);
+    without it (`HU_GCC_WRAPPERS`, or cross-compiling without a host compiler), blanks work in none of them;
   * on Windows (MinGW-w64), non-ASCII source and build directories work with `hu-mapper` (the default); without it
     (`HU_GCC_WRAPPERS` ON), a non-ASCII build directory or header path is rejected at configure time: GCC quotes such a
     path in its module-mapper requests, which its own mapper-file reader does not understand;
@@ -475,7 +481,7 @@ Each test is a standalone CMake project with a one-line README:
 
 | test | what it covers |
 |---|---|
-| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable; on Windows also a `target_auto_header_units` project in directories named `*-é中` (MSVC: `*-é`), first configured with its source locked: the lock is reported and not cached, and `hu-mapper` serves GCC from non-ASCII paths |
+| t01_stl | `import <vector>/<string>/<iostream>` in a plain executable; on Windows also a `target_auto_header_units` project in directories named `*-é中` (MSVC: `*-é`), first configured with its source locked: the lock is reported and not cached, and `hu-mapper` serves GCC from non-ASCII paths; on every toolchain, source and build directories with blanks and a source in a subdirectory with one (GCC: both sources read `<vector>` from its BMI) |
 | t02_thirdparty | fmt + nlohmann_json (+ Boost on Linux) + STL header units in one TU; overlapping sets; GCC build-order independence |
 | t03_named_modules | named modules with `export import <vector>`; cross-target importers, including CMake's synthesized BMI targets |
 | t04_shared_set | two targets share a set; incompatible consumers (C++23, extensions off, `-fno-exceptions`, a consumer-only `_GLIBCXX_DEBUG` / `_ITERATOR_DEBUG_LEVEL`, a consumer directory's own `CMAKE_CXX_FLAGS_DEBUG`, duplicate header) are rejected at configure time; the flags and ABI cases also under Ninja Multi-Config, with the configuration named in the message (Debug only for `_ITERATOR_DEBUG_LEVEL=0` with the MSVC STL); a consumer directory that adds only warning / debug-information flags is accepted and builds |

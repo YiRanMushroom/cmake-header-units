@@ -200,6 +200,47 @@ std::string lookup(const std::string& index, const std::string& source, const st
   return found;
 }
 
+// The source of a compile, for "-c <modmap> <index>": GCC splits its mapper option at blanks, with no quoting, so the
+// source cannot be an argument when its path has a blank.  CMAKE-INTERNAL (observed): CMake's scan of the compile writes
+// the depfile "<object>.ddi.d" (the modmap is "<object>.modmap"), whose first prerequisite is the source as the compile
+// gets it (Ninja's $in), escaped as in a Makefile ("\ ", "\#", "$$").  Ninja keeps that depfile (the scan rule has no
+// "deps"), and the scan runs before the compile.  "" when it cannot be read: no header-unit map.
+std::string source_of(const std::string& modmap) {
+  const std::string suffix = ".modmap";
+  if (modmap.size() <= suffix.size() || modmap.compare(modmap.size() - suffix.size(), suffix.size(), suffix) != 0)
+    return "";
+  FILE* f = uopen(modmap.substr(0, modmap.size() - suffix.size()) + ".ddi.d", false);
+  if (!f) return "";
+  std::string d;
+  char buf[4096];
+  size_t got;
+  while ((got = std::fread(buf, 1, sizeof buf, f)) > 0) d.append(buf, got);
+  std::fclose(f);
+  size_t i = 0;
+  for (; i < d.size(); ++i)                 // the end of the rule's target: a ':' followed by a blank or a line end
+    if (d[i] == ':' && (i + 1 == d.size() || d[i + 1] == ' ' || d[i + 1] == '\t' || d[i + 1] == '\r' || d[i + 1] == '\n'))
+      break;
+  ++i;
+  for (;;) {                                // blanks and line continuations before the first prerequisite
+    while (i < d.size() && (d[i] == ' ' || d[i] == '\t')) ++i;
+    if (i + 1 < d.size() && d[i] == '\\' && (d[i + 1] == '\n' || d[i + 1] == '\r')) {
+      i += d[i + 1] == '\r' && i + 2 < d.size() && d[i + 2] == '\n' ? 3 : 2;
+      continue;
+    }
+    break;
+  }
+  std::string s;
+  for (; i < d.size(); ++i) {
+    char c = d[i];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') break;
+    if (c == '\\' && i + 1 < d.size() && (d[i + 1] == ' ' || d[i + 1] == '#' || d[i + 1] == '\t')) c = d[++i];
+    else if (c == '\\' && i + 1 < d.size() && (d[i + 1] == '\n' || d[i + 1] == '\r')) break;
+    else if (c == '$' && i + 1 < d.size() && d[i + 1] == '$') ++i;
+    s += c;
+  }
+  return s;
+}
+
 // ---- scan --------------------------------------------------------------------------------------------------------
 // Request (one directive per line): "cache <file>", then per auto request "req <id>", its search list "dir <d>" (in
 // order) and its sources "src <s>".  Result per request: "req <id>", "file <s>" for each source that exists, the
@@ -535,7 +576,7 @@ int main(int argc, char** argv) {
   const size_t n = args.size();
   const std::string a1 = n > 1 ? args[1] : "";
   if (n == 2 && a1 == "-v") {
-    std::puts("hu-mapper 3");
+    std::puts("hu-mapper 4");
     return 0;
   }
   if (n == 4 && a1 == "scan") return scan(args[2], args[3]);
@@ -550,15 +591,15 @@ int main(int argc, char** argv) {
       std::fprintf(stderr, "hu-mapper: cannot open %s\n", args[2].c_str());
       return 2;
     }
-  } else if (n == 5 && a1 == "-c") {
+  } else if ((n == 4 || n == 5) && a1 == "-c") {
     load(args[2], m);                       // (CMake writes it before the compile; none: no named modules)
-    std::string hu = lookup(args[3], args[4], args[2]);
+    std::string hu = lookup(args[3], n == 5 ? args[4] : source_of(args[2]), args[2]);
     if (!hu.empty() && !load(hu, m)) {
       std::fprintf(stderr, "hu-mapper: cannot open %s\n", hu.c_str());
       return 2;
     }
   } else {
-    std::fprintf(stderr, "usage: hu-mapper <map> | -s <map> | -c <modmap> <index> <source> | scan <request> <result> | -v\n");
+    std::fprintf(stderr, "usage: hu-mapper <map> | -s <map> | -c <modmap> <index> [<source>] | scan <request> <result> | -v\n");
     return 2;
   }
   const std::string& root = m.root;
