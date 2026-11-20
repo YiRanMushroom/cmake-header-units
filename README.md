@@ -466,8 +466,8 @@ git push origin release
 git tag -a v<x.y.z> release -m "HeaderUnits.cmake v<x.y.z>" && git push origin v<x.y.z>   # a version
 ```
 
-Versions are tags on `release` commits, so `GIT_TAG v<x.y.z>` fetches only the module too. v0.1.0 (2026-11-19) is the
-first.
+Versions are tags on `release` commits, so `GIT_TAG v<x.y.z>` fetches only the module too. v0.1.0 (2026-11-19) was
+the first; v0.1.1 (2026-11-20) is the latest.
 
 ## Tests
 
