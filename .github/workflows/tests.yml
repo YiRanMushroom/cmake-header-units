@@ -1,0 +1,120 @@
+# Runs the test suite on every push to main and on pull requests: Linux in the toolchain image of docker/ (GCC 16,
+# Clang 22 with libstdc++ and with libc++), Windows with MSVC, clang++ and clang-cl (LLVM 22.1.8) and MinGW-w64 GCC
+# 16.1, each with Ninja. A test that fails fails the job; results.txt and the logs are kept as an artifact.
+name: tests
+
+on:
+  push:
+    branches: [main, ci]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.tc }}, CMake ${{ matrix.cmake }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        tc: [gcc, clang, libcxx]
+        cmake: [4.4.5, 4.5.0]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain image (docker/)
+        run: |
+          docker build -q -t hu-toolchain:latest docker
+          docker build -q -t hu-toolchain:ext docker/ext
+      - name: CMake ${{ matrix.cmake }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/cmake.tgz" "https://github.com/Kitware/CMake/releases/download/v${{ matrix.cmake }}/cmake-${{ matrix.cmake }}-linux-x86_64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/cmake"
+          tar -xzf "$RUNNER_TEMP/cmake.tgz" -C "$RUNNER_TEMP/cmake" --strip-components=1
+      - name: Tests
+        run: |
+          case "${{ matrix.tc }}" in
+            clang)  extra='-DCLANG_CXX=clang++-22 -DCLANG_FLAGS=--gcc-toolchain=/usr/local' ;;
+            libcxx) extra='-DCLANG_CXX=clang++-22 -DLIBCXX_FLAGS=-stdlib=libc++ -DLIBCXX_MODULES_JSON=/usr/lib/llvm-22/lib/libc++.modules.json' ;;
+            *)      extra='' ;;
+          esac
+          docker run --rm -e NINJA_JOBS=4 -v "$PWD:/src" -v "$RUNNER_TEMP/cmake:/opt/cmake" -w /src hu-toolchain:ext \
+            sh -c "/opt/cmake/bin/cmake -DTC=${{ matrix.tc }} -DCMAKE_EXE=/opt/cmake/bin/cmake -DTAG=ci -DJOBS=2 $extra -P tests/run_parallel.cmake"
+      - name: Results
+        if: always()
+        run: |
+          r="_build/${{ matrix.tc }}-ci/results.txt"
+          cut -d'|' -f1-6 "$r" | cut -c1-300
+          ! grep -q '|FAIL|' "$r"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-${{ matrix.tc }}-${{ matrix.cmake }}
+          path: |
+            _build/${{ matrix.tc }}-ci/results.txt
+            _build/${{ matrix.tc }}-ci/logs/
+
+  windows:
+    name: Windows ${{ matrix.tc }}
+    runs-on: windows-2025
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        tc: [msvc, win, clangcl, mingw]
+    env:
+      CMAKE_VERSION: 4.5.0
+      LLVM_VERSION: 22.1.8
+      WINLIBS: 16.1.0posix-14.0.0-ucrt-r4/winlibs-x86_64-posix-seh-gcc-16.1.0-mingw-w64ucrt-14.0.0-r4.zip
+      NINJA_JOBS: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: CMake, Ninja, fmt and nlohmann_json
+        shell: pwsh
+        run: |
+          $t = $env:RUNNER_TEMP
+          curl.exe -fsSL -o "$t\cmake.zip" "https://github.com/Kitware/CMake/releases/download/v$env:CMAKE_VERSION/cmake-$env:CMAKE_VERSION-windows-x86_64.zip"
+          Expand-Archive "$t\cmake.zip" "$t\cmake-x"
+          $c = (Get-ChildItem "$t\cmake-x" -Directory | Select-Object -First 1).FullName
+          "CMAKE_EXE=$($c -replace '\\','/')/bin/cmake.exe" | Out-File -Append $env:GITHUB_ENV
+          python -m pip install --quiet ninja
+          git clone -q --depth 1 --branch 10.1.1 https://github.com/fmtlib/fmt.git ext-src/fmt
+          git clone -q --depth 1 --branch v3.11.3 https://github.com/nlohmann/json.git ext-src/nlohmann_json
+      - name: LLVM ${{ env.LLVM_VERSION }}
+        if: matrix.tc == 'win' || matrix.tc == 'clangcl'
+        shell: pwsh
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\llvm.exe" "https://github.com/llvm/llvm-project/releases/download/llvmorg-$env:LLVM_VERSION/LLVM-$env:LLVM_VERSION-win64.exe"
+          Start-Process -Wait -FilePath "$env:RUNNER_TEMP\llvm.exe" -ArgumentList '/S', '/D=C:\llvm-ci'
+          $exe = if ('${{ matrix.tc }}' -eq 'win') { 'clang++.exe' } else { 'clang-cl.exe' }
+          "TC_EXTRA=-DCLANG_CXX=C:/llvm-ci/bin/$exe" | Out-File -Append $env:GITHUB_ENV
+      - name: MinGW-w64 GCC 16.1 (winlibs)
+        if: matrix.tc == 'mingw'
+        shell: pwsh
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\mingw.zip" "https://github.com/brechtsanders/winlibs_mingw/releases/download/$env:WINLIBS"
+          Expand-Archive "$env:RUNNER_TEMP\mingw.zip" 'C:\mingw-ci'
+          'C:\mingw-ci\mingw64\bin' | Out-File -Append $env:GITHUB_PATH
+          "TC_EXTRA=-DMINGW_CXX=C:/mingw-ci/mingw64/bin/g++.exe" | Out-File -Append $env:GITHUB_ENV
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.tc != 'mingw'
+      - name: Tests
+        shell: cmd
+        run: '"%CMAKE_EXE%" -DTC=${{ matrix.tc }} "-DCMAKE_EXE=%CMAKE_EXE%" -DTAG=ci -DJOBS=2 %TC_EXTRA% -P tests\run_parallel.cmake'
+      - name: Results
+        if: always()
+        shell: pwsh
+        run: |
+          $r = "_build/${{ matrix.tc }}-ci/results.txt"
+          Get-Content $r | ForEach-Object { $_.Substring(0, [Math]::Min(300, $_.Length)) }
+          if (Select-String -Path $r -SimpleMatch '|FAIL|' -Quiet) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.tc }}
+          path: |
+            _build/${{ matrix.tc }}-ci/results.txt
+            _build/${{ matrix.tc }}-ci/logs/
