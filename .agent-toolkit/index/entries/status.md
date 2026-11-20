@@ -1,7 +1,7 @@
 +++
 title = "Status: where the work stands"
 +++
-Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.0. The `release` branch was updated from this main at the owner's word (see the release commit's message for the main commit); no new tag.
+Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.0. The `release` branch is at 2143c70 (the module of main 2386663, pushed 2026-11-20 at the owner's word); no new tag.
 
 What the owner wants (clarified 2026-11-19): "lean and fast" means: decide which features to support, write them mostly in one go, then adapt them bit by bit -- not dropping what should be supported. The owner keeps every feature: HU_ALLOW_HEADER_IMPORTS, the HU_GCC_WRAPPERS fallback, hu-mapper's import scan, Ninja Multi-Config, target_header_units_scan_sources. Known gaps are work to do, not things to leave. Every wait has a timeout of at most 3 minutes (instructions.project).
 
@@ -19,7 +19,7 @@ Verified: the full matrix at 69a26f9 (README Results): Linux gcc/clang/libcxx 28
 
 Open:
 1. Not covered by a test: the consumer warning naming a configuration (Multi-Config), GCC map keys for one file reached through differently spelled directories in different configurations, sources added through INTERFACE_SOURCES of linked libraries (neither command sees them), a GENERATED source with a same-named file in the source directory.
-2. Ask the owner about a v0.1.1 tag on the current release commit.
+2. Ask the owner about a v0.1.1 tag on the release commit 2143c70.
 
 Learned while testing:
 - This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work, 5-7 minutes; slower when also subagents run tests. On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.
