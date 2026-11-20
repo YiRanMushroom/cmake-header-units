@@ -18,7 +18,9 @@ Done since f2767f7 (all on main, pushed):
 Verified: the full matrix at 69a26f9 (README Results): Linux gcc/clang/libcxx 28/28 with CMake 4.5.0, 27 + t22 SKIP with 4.4.5; Windows win 28/28, clangcl 28/28, mingw 27 + XFAIL t02, msvc 25 + XFAIL t02/t08/t11; MSBuild (run-msvc.bat, earlier the same day) 11 + XFAIL t02/t08/t11. After it (the CMP0115 skip, a t28 case): t03, t08, t15, t28 on mingw, win, clangcl, msvc and t08, t15, t28 on Linux gcc/clang/libcxx (CMake 4.4.5): PASS (msvc t08 XFAIL).
 
 Open:
-1. Not covered by a test: the consumer warning naming a configuration (Multi-Config), GCC map keys for one file reached through differently spelled directories in different configurations, sources added through INTERFACE_SOURCES of linked libraries (neither command sees them), a GENERATED source with a same-named file in the source directory.
+1. Not covered by a test: the consumer warning naming a configuration (Multi-Config), GCC map keys for one file reached through differently spelled directories in different configurations, a GENERATED source with a same-named file in the source directory.
+
+Out of scope (owner, 2026-11-20): sources a linked library adds through INTERFACE_SOURCES. Neither command sees them; a library that imports header units in such a source is responsible for making it compile.
 
 Learned while testing:
 - This machine (32 threads, 64 GB): all four Windows suites plus two Linux containers at once work, 5-7 minutes; slower when also subagents run tests. On a 16 GB machine four suites at once froze it: there one toolchain at a time, e.g. JOBS=2 NINJA_JOBS=5, and Linux and Windows runs not at the same time.

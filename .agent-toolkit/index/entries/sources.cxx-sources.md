@@ -31,4 +31,4 @@ Probed with CMake 4.5.0:
 
 Explicit names (target_header_units_scan_sources, target_import_header_units SOURCES) are resolved at the call with _hu_source_path in the calling directory. So a generated source given by name keeps the "does not exist at configure time" message (probed with a custom-command output), and target_import_header_units SOURCES accepts it (t28i; before, it was "not a C++ source"). A name that exists nowhere, e.g. a typo, is reported with its build-directory path. t28 covers all of this, and fails on every case with the code before.
 
-Not handled: INTERFACE_SOURCES of linked libraries are compiled into the consumer, but neither command sees them.
+Out of scope (owner's decision, 2026-11-20): INTERFACE_SOURCES of linked libraries are compiled into the consumer, but neither command sees them. A library that uses header units in such a source is responsible for it compiling.
