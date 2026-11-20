@@ -25,6 +25,8 @@ Open:
 - MSVC with Ninja (2026-11-20): header units are built with an object file (definitions such as std::strong_ordering::less live only there), linked by every importing target (note msvc.ninja); t29_hu_objects covers it (fails before on 19.44). Checked: the full msvc suite and t29 on win, clangcl, mingw. The std::strong_ordering::less failure CI saw on 19.52 was this bug, not MSVC's.
 - Upstream bugs (2026-11-20, nothing posted; the owner decided not to report): the MinGW t02 failure is GCC PR 125301 (unconfirmed; locals of imported inline functions not in COMDAT sections, GCC 13.2-16.1); a draft comment with a header-unit repro is in the session scratchpad (bugrepro/), not kept. MSVC do_put: no report, fixed in 19.52 per CI. std::strong_ordering::less with 19.52: the module case is DevCom 11128871 (fixed 18.12); the header-unit case is unreported and needs a CI repro.
 
+Decided (owner, 2026-11-20): the current scheme is good enough; no own build-time scanner (text scan as in mcpp-community/mcpp, or skipping CMake's scan for header-unit-only sources) and no build-time header-unit discovery. Wait for CMake's native header units (issue #25293).
+
 Out of scope (owner, 2026-11-20): sources a linked library adds through INTERFACE_SOURCES. Neither command sees them; a library that imports header units in such a source is responsible for making it compile.
 
 Learned while testing:
