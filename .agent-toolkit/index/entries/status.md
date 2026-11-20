@@ -1,7 +1,7 @@
 +++
 title = "Status: where the work stands"
 +++
-Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.1 (on release 2143c70). The `release` branch is at 2143c70 (the module of main 2386663, pushed 2026-11-20 at the owner's word), tagged v0.1.1.
+Written 2026-11-19 at main (see git log; this note is committed with the work). Last version tag: v0.1.2 (on release 3c2deb2, the module of main b92fd72, 2026-11-20): GCC blanks in paths, MSVC header-unit objects, MSVC 19.52. v0.1.1 is release 2143c70.
 
 What the owner wants (clarified 2026-11-19): "lean and fast" means: decide which features to support, write them mostly in one go, then adapt them bit by bit -- not dropping what should be supported. The owner keeps every feature: HU_ALLOW_HEADER_IMPORTS, the HU_GCC_WRAPPERS fallback, hu-mapper's import scan, Ninja Multi-Config, target_header_units_scan_sources. Known gaps are work to do, not things to leave. Every wait has a timeout of at most 3 minutes (instructions.project).
 
