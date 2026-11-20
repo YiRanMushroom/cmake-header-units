@@ -1,10 +1,13 @@
 # HeaderUnits/MSVCNinja.cmake -- the MSVC strategy with Ninja (included by HeaderUnits.cmake when the C++ compiler is
 # MSVC and the generator is not a Visual Studio one; there MSBuild builds header units itself, HeaderUnits/MSVC.cmake).
 #
-# * A header unit is identified by the resolved path of its header.  Its IFC is built with /exportHeader /ifcOnly and
-#   written as the set's object file (/ifcOutput), so it is a real Ninja output, rebuilt when it is deleted (like GCC's
-#   -fmodule-only CMI).  The header's own #includes stay textual (no /translateInclude there).  A header in two sets
-#   of one directory has one set of source properties, so they do not depend on the set (as in Clang.cmake).
+# * A header unit is identified by the resolved path of its header.  It is built with /exportHeader into the set's object
+#   file and an IFC next to it (/ifcOutput), declared as a further output of that compile (OBJECT_OUTPUTS), so it is a
+#   real Ninja output, rebuilt when it is deleted.  The object holds definitions that importers reference but do not
+#   emit (static data members such as std::strong_ordering::less, <format>'s precision tables): every target that
+#   imports the set links it (_hu_MSVC_consumers_done).  The header's own #includes stay textual (no /translateInclude
+#   there).  A header in two sets of one directory has one set of source properties, so they do not depend on the set
+#   (as in Clang.cmake).
 # * A consumer source gets /headerUnit "<path>=<ifc>" for each of its header units, and /translateInclude, in a
 #   response file (one per distinct content): an import of the header, or an #include of it, uses the IFC.  The
 #   dependency scan gets
@@ -57,18 +60,51 @@ macro(_hu_MSVC_add_header)
     else()
       set_property(GLOBAL PROPERTY _HU_MSVC_ONAME_${dk} "${oname}")
     endif()
-    # CMAKE-INTERNAL: object location, see Clang.cmake.  With /ifcOnly cl writes no object; the IFC takes its place:
-    # /ifcOutput names the object path, relative to the top build dir, with the set's directory spelled
-    # $<TARGET_PROPERTY:NAME> (the target that compiles it), as clang-cl's /clang:-o in Clang.cmake.
-    set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+    # CMAKE-INTERNAL: object location, see Clang.cmake.  file(RELATIVE_PATH): the IFC is named relative to the top
+    # build dir (Ninja's working directory).
     file(RELATIVE_PATH od "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles")
-    set(rcmi "${od}/$<TARGET_PROPERTY:NAME>.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+    set(obj "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
     get_property(tcdeps GLOBAL PROPERTY _HU_MSVC_TOOLCHAIN_DEPS)
-    set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
-      LANGUAGE CXX
-      OBJECT_NAME "hu/${oname}"
-      OBJECT_DEPENDS "${tcdeps}"
-      COMPILE_OPTIONS "/exportHeader;/ifcOnly;/ifcOutput;${rcmi}")
+    if(NOT prev_oname)
+      # The usual case: /exportHeader writes the object (the header unit's definitions, linked by every importer) and
+      # the IFC next to it, "<object name>.ifc", declared as a further output of the compile.
+      set(cmi "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${set}.dir/hu/${oname}.ifc")
+      set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
+        LANGUAGE CXX
+        OBJECT_NAME "hu/${oname}"
+        OBJECT_DEPENDS "${tcdeps}"
+        OBJECT_OUTPUTS "${cmi}"
+        COMPILE_OPTIONS "/exportHeader;/ifcOutput;${od}/${set}.dir/hu/${oname}.ifc")
+      set_source_files_properties("${obj}" DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+      set_property(GLOBAL APPEND PROPERTY _HU_SET_${set}_OBJS "${obj}")
+      set_property(GLOBAL PROPERTY _HU_MSVC_FIRST_${dk} "${set}|${cmi}|${obj}")
+    else()
+      # The same header in a second set of this directory: OBJECT_OUTPUTS cannot name a file per target, so for this
+      # header every set of the directory builds only the IFC (/ifcOnly), written as the set's object file
+      # ($<TARGET_PROPERTY:NAME>: the target that compiles it).  No object holds its definitions (README, Limitations).
+      set(cmi "${obj}")
+      set_source_files_properties("${p}" TARGET_DIRECTORY ${set} PROPERTIES
+        OBJECT_OUTPUTS ""
+        COMPILE_OPTIONS "/exportHeader;/ifcOnly;/ifcOutput;${od}/$<TARGET_PROPERTY:NAME>.dir/hu/${oname}${CMAKE_CXX_OUTPUT_EXTENSION}")
+      get_property(first GLOBAL PROPERTY _HU_MSVC_FIRST_${dk})
+      if(first)
+        set_property(GLOBAL PROPERTY _HU_MSVC_FIRST_${dk} "")
+        string(REPLACE "|" ";" first "${first}")
+        list(GET first 0 fset)
+        list(GET first 1 fifc)
+        list(GET first 2 fobj)
+        get_property(fc GLOBAL PROPERTY _HU_SET_${fset}_CMIS)
+        list(FIND fc "${fifc}" fi)
+        if(fi GREATER -1)
+          list(REMOVE_AT fc ${fi})
+          list(INSERT fc ${fi} "${fobj}")
+        endif()
+        set_property(GLOBAL PROPERTY _HU_SET_${fset}_CMIS "${fc}")
+        get_property(fo GLOBAL PROPERTY _HU_SET_${fset}_OBJS)
+        list(REMOVE_ITEM fo "${fobj}")
+        set_property(GLOBAL PROPERTY _HU_SET_${fset}_OBJS "${fo}")
+      endif()
+    endif()
     list(APPEND cmis "${cmi}")
 endmacro()
 
@@ -155,12 +191,29 @@ endmacro()
 macro(_hu_MSVC_consumers_done)
     get_property(_hu_tus GLOBAL PROPERTY _HU_TUS)
     set(_hu_itargets)
+    set(_hu_ltargets)
     foreach(_hu_tu IN LISTS _hu_tus)
       string(FIND "${_hu_tu}" "|" _hu_bar)
       string(SUBSTRING "${_hu_tu}" 0 ${_hu_bar} _hu_t)
       math(EXPR _hu_bar "${_hu_bar} + 1")
       string(SUBSTRING "${_hu_tu}" ${_hu_bar} -1 _hu_src)
       string(MD5 _hu_tk "${_hu_t}")
+      # The sets whose objects the target links: its sources' sets and, with HU_ALLOW_HEADER_IMPORTS, the sets their
+      # headers import.
+      if(NOT DEFINED _hu_ls_${_hu_tk})
+        list(APPEND _hu_ltargets "${_hu_t}")
+        set(_hu_ls_${_hu_tk})
+      endif()
+      string(MD5 _hu_tuk "${_hu_tu}")
+      get_property(_hu_ss GLOBAL PROPERTY _HU_TU_${_hu_tuk}_SETS)
+      while(_hu_ss)
+        list(POP_FRONT _hu_ss _hu_s)
+        if(NOT _hu_s IN_LIST _hu_ls_${_hu_tk})
+          list(APPEND _hu_ls_${_hu_tk} "${_hu_s}")
+          get_property(_hu_ds GLOBAL PROPERTY _HU_SET_${_hu_s}_DEPSETS)
+          list(APPEND _hu_ss ${_hu_ds})
+        endif()
+      endwhile()
       if(NOT DEFINED _hu_mf_${_hu_tk})      # the target's module interface units
         set(_hu_mf_${_hu_tk})
         get_target_property(msets ${_hu_t} CXX_MODULE_SETS)
@@ -199,5 +252,24 @@ macro(_hu_MSVC_consumers_done)
       _hu_write("${irsp}" "${ilines}\n" BOM)
       set_property(TARGET ${it} APPEND PROPERTY INTERFACE_COMPILE_OPTIONS "$<BUILD_INTERFACE:@${irsp}>")
       set_property(TARGET ${it} APPEND PROPERTY COMPILE_OPTIONS "@${irsp}")
+    endforeach()
+    # Each target that imports a set links the objects of its header units (their definitions; _HU_SET_<set>_OBJS, not
+    # $<TARGET_OBJECTS>: a header of two sets of one directory has only an IFC there), as sources (no
+    # target_link_libraries: its plain and keyword signatures cannot be mixed on a target).  An object library passes
+    # them on to the targets that link it (INTERFACE_SOURCES).
+    foreach(lt IN LISTS _hu_ltargets)
+      string(MD5 ltk "${lt}")
+      get_target_property(ltype ${lt} TYPE)
+      foreach(ls IN LISTS _hu_ls_${ltk})
+        get_property(lobjs GLOBAL PROPERTY _HU_SET_${ls}_OBJS)
+        if(NOT lobjs)
+          continue()
+        endif()
+        if(ltype STREQUAL "OBJECT_LIBRARY")
+          set_property(TARGET ${lt} APPEND PROPERTY INTERFACE_SOURCES ${lobjs})
+        else()
+          set_property(TARGET ${lt} APPEND PROPERTY SOURCES ${lobjs})
+        endif()
+      endforeach()
     endforeach()
 endmacro()
