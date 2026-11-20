@@ -1890,8 +1890,9 @@ foreach(t IN LISTS TESTS)
   if(TC STREQUAL "mingw" AND name MATCHES "^(t02_thirdparty)$")
     set(known TRUE)
   endif()
-  # MSVC: fmt 10.1.1 header-only does not link through a header unit (as with MSBuild): format_facet::do_put
-  if(TC STREQUAL "msvc" AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$")
+  # MSVC: fmt 10.1.1 header-only does not link through a header unit (as with MSBuild): format_facet::do_put.  Fixed in
+  # MSVC 19.52 (Visual Studio 2026, toolset 14.52: links in CI); still so with 19.44 (toolset 14.44).
+  if(TC STREQUAL "msvc" AND "$ENV{VCToolsVersion}" VERSION_LESS 14.50 AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$")
     set(known TRUE)
   endif()
   if(sk AND NOT f)
