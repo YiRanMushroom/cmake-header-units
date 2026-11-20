@@ -424,7 +424,8 @@ scheme):
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
-    (`format_facet<std::locale>::do_put` unresolved; see Tests); it links with MSVC 19.52 (Visual Studio 2026);
+    (`format_facet<std::locale>::do_put` unresolved; see Tests); it links with MSVC 19.52 (Visual Studio 2026), where
+    t02_thirdparty fails some of the time on another symbol instead (`std::strong_ordering::less` unresolved);
   * with MSVC 19.44 (Visual Studio 2022) and Ninja, a build directory with a character outside the ANSI code page fails
     the configure's header-lookup self-check: cl prints `/showIncludes` in the ANSI code page (19.52 in UTF-8), where it becomes `?` (characters in it, e.g. "é", work;
     the module writes its response files with a UTF-8 byte order mark, which cl then reads as UTF-8). In a non-ASCII
