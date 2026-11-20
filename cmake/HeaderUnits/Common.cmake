@@ -489,9 +489,19 @@ function(_hu_self_check)
   if(tc STREQUAL "MSVC")
     # cl: /showIncludes names each opened header on stdout ("<prefix><path>", one more blank per nesting level), with
     # CMake's detected (localized) prefix; /Zs: syntax check only, no preprocessed output.
-    # cl prints in the ANSI code page (a path outside it comes out with "?", which no lookup can match).
+    # Its encoding depends on the version: MSVC 19.44 (Visual Studio 2022) prints in the ANSI code page (a path outside
+    # it comes out with "?", which no lookup can match), 19.52 (Visual Studio 2026) in UTF-8.  Only a non-ASCII probe
+    # directory tells them apart: read as UTF-8, and again as ANSI when the output does not name the directory.
     set(cmd "${CMAKE_CXX_COMPILER}" /nologo ${args} /Zs /showIncludes "${src}")
-    execute_process(COMMAND ${cmd} OUTPUT_VARIABLE err ERROR_VARIABLE err RESULT_VARIABLE rc ENCODING ANSI)
+    set(enc ANSI)
+    if(NOT sc MATCHES "^[ -~]*$")
+      set(enc UTF8)
+    endif()
+    execute_process(COMMAND ${cmd} OUTPUT_VARIABLE err ERROR_VARIABLE err RESULT_VARIABLE rc ENCODING ${enc})
+    string(FIND "${err}" "${sc}/" at)
+    if(enc STREQUAL "UTF8" AND at LESS 0)
+      execute_process(COMMAND ${cmd} OUTPUT_VARIABLE err ERROR_VARIABLE err RESULT_VARIABLE rc ENCODING ANSI)
+    endif()
   else()
     set(hflag -H)
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

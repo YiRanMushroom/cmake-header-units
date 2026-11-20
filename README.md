@@ -424,9 +424,9 @@ scheme):
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
-    (`format_facet<std::locale>::do_put` unresolved; see Tests);
-  * with Ninja, a build directory with a character outside the ANSI code page fails the configure's header-lookup
-    self-check: cl prints `/showIncludes` in the ANSI code page, where it becomes `?` (characters in it, e.g. "é", work;
+    (`format_facet<std::locale>::do_put` unresolved; see Tests); it links with MSVC 19.52 (Visual Studio 2026);
+  * with MSVC 19.44 (Visual Studio 2022) and Ninja, a build directory with a character outside the ANSI code page fails
+    the configure's header-lookup self-check: cl prints `/showIncludes` in the ANSI code page (19.52 in UTF-8), where it becomes `?` (characters in it, e.g. "é", work;
     the module writes its response files with a UTF-8 byte order mark, which cl then reads as UTF-8). In a non-ASCII
     directory every build recompiles the TUs whose headers are there, also without this module: Ninja records cl's
     `/showIncludes` in the ANSI code page while CMake writes build.ninja in UTF-8;
@@ -555,7 +555,7 @@ How to run:
   17.14) first on PATH, which cannot build header units of the C++ library with Windows SDK 10.0.26100; `set
   CLANG_CXX=<path to clang++.exe or clang-cl.exe>` selects another.
 * Windows, MSVC: `run-msvc.bat` configures, builds and runs ctest (the one next to `CMAKE_EXE`) with a Visual Studio
-  generator; t04 and t09 are skipped, and t02, t08 and t11 are XFAIL (fmt's `do_put`, see Limitations).
+  generator; t04 and t09 are skipped, and t02, t08 and t11 are XFAIL with MSVC 19.44 (fmt's `do_put`, see Limitations).
   `run-msvc-ninja.bat` runs the suite with MSVC and Ninja (`TC=msvc`). There, Ninja keeps no C++ library
   header in its dependency records, so the checks that a library header was read textually or from its BMI see nothing
   for those headers; the IDE probe and t04's extensions variant do not apply. t01 also checks that a CMake run without
