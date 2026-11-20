@@ -1891,8 +1891,10 @@ foreach(t IN LISTS TESTS)
     set(known TRUE)
   endif()
   # MSVC: fmt 10.1.1 header-only does not link through a header unit (as with MSBuild): format_facet::do_put.  Fixed in
-  # MSVC 19.52 (Visual Studio 2026, toolset 14.52: links in CI); still so with 19.44 (toolset 14.44).
-  if(TC STREQUAL "msvc" AND "$ENV{VCToolsVersion}" VERSION_LESS 14.50 AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$")
+  # MSVC 19.52 (Visual Studio 2026, toolset 14.52: links in CI); still so with 19.44 (toolset 14.44).  With 19.52, t02
+  # fails some of the time on another symbol, std::strong_ordering::less unresolved (CI, 2026-11-20).
+  if(TC STREQUAL "msvc" AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$"
+     AND ("$ENV{VCToolsVersion}" VERSION_LESS 14.50 OR name STREQUAL "t02_thirdparty"))
     set(known TRUE)
   endif()
   if(sk AND NOT f)
