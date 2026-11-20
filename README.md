@@ -1,5 +1,7 @@
 # HeaderUnits.cmake
 
+[![tests](https://github.com/YiRanMushroom/cmake-header-units/actions/workflows/tests.yml/badge.svg)](https://github.com/YiRanMushroom/cmake-header-units/actions/workflows/tests.yml)
+
 C++20 **header units** with CMake for **GCC, Clang and MSVC**, which CMake itself does not support yet. Add one module,
 then write `import <vector>;`, `import <fmt/format.h>;` or `import "my/header.h";` instead of `#include` in your sources,
 for the standard library, third-party libraries and your own headers. The same CMakeLists.txt also works with
@@ -400,8 +402,9 @@ scheme):
     (`HU_GCC_WRAPPERS` ON), a non-ASCII build directory or header path is rejected at configure time: GCC quotes such a
     path in its module-mapper requests, which its own mapper-file reader does not understand;
   * on Windows (MinGW-w64), t02_thirdparty fails to link: fmt's function-local static arrays in inline functions,
-    reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. This
-    predates the header lookup without `try_compile` (same failure with the earlier code).
+    reached through the header unit and through `#include` in two TUs, are reported as multiple definitions. GCC puts
+    such locals of an imported inline function in a plain section instead of a COMDAT one (GCC 13.2 to 16.1; reported
+    upstream as [GCC PR 125301](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=125301), unconfirmed).
 * A consumer whose include path finds, for a header of its sets, another file that has no header unit gets a
   configure warning: an import of that header fails to compile (a `#include` of it stays textual).
 * The lookup takes a target's own `target_include_directories(SYSTEM ...)` directory for an `-I` one (CMake does not
@@ -522,6 +525,10 @@ For each test, `tests/run_suite.cmake` runs:
 
 How to run:
 
+* CI: `.github/workflows/tests.yml` runs the suite on every push to `main` and on pull requests: Linux GCC, Clang with
+  libstdc++ and with libc++ in the image of `docker/` with CMake 4.4.5 and 4.5.0; Windows MSVC 19.52 (Visual Studio
+  2026) and 19.44 (Visual Studio 2022), clang++ and clang-cl (LLVM 22.1.8) and MinGW-w64 GCC 16.1 (winlibs) with CMake
+  4.5.0, all with Ninja. A FAIL fails the job (XFAIL and XPASS do not); each job keeps `results.txt` and the logs.
 * Every runner script uses `tests/run_parallel.cmake`: each test is a CTest test that runs `run_suite.cmake` for that
   test alone, `ctest -j` runs them (`JOBS=<n>` tests at a time, default a quarter of the logical cores; `NINJA_JOBS=<n>`,
   also as an environment variable, limits each test's own ninja, which otherwise uses every core), and the

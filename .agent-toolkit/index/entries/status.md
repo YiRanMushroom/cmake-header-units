@@ -21,6 +21,9 @@ Verified: the full matrix at 69a26f9 (README Results): Linux gcc/clang/libcxx 28
 Open:
 1. Not covered by a test: the consumer warning naming a configuration (Multi-Config), GCC map keys for one file reached through differently spelled directories in different configurations, a GENERATED source with a same-named file in the source directory.
 
+- CI (2026-11-20): .github/workflows/tests.yml on every push to main and on pull requests, 11 jobs (Linux gcc/clang/libcxx x CMake 4.4.5/4.5.0 in the docker/ image; Windows msvc on windows-2025 = VS 2026 MSVC 19.52 and windows-2022 = VS 2022 MSVC 19.44, win, clangcl with LLVM 22.1.8, mingw with winlibs GCC 16.1). Green. Found by it: MSVC 19.52 prints /showIncludes in UTF-8 (the self-check reads UTF-8, then ANSI); fmt's do_put links with 19.52; t02 fails some of the time with 19.52 on std::strong_ordering::less (XFAIL for every MSVC); winlibs' own ninja.exe cannot enter non-ANSI directories (CI deletes it). GitHub's job logs: gh api --allow-escape-sequences repos/<repo>/actions/jobs/<id>/logs (gh run view --log waits for the whole run).
+- Upstream bugs (2026-11-20, nothing posted): the MinGW t02 failure is GCC PR 125301 (unconfirmed; locals of imported inline functions not in COMDAT sections, GCC 13.2-16.1); a draft comment with a header-unit repro is in the session scratchpad (bugrepro/), not kept. MSVC do_put: no report, fixed in 19.52 per CI. std::strong_ordering::less with 19.52: the module case is DevCom 11128871 (fixed 18.12); the header-unit case is unreported and needs a CI repro.
+
 Out of scope (owner, 2026-11-20): sources a linked library adds through INTERFACE_SOURCES. Neither command sees them; a library that imports header units in such a source is responsible for making it compile.
 
 Learned while testing:
