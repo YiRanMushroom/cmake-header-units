@@ -1,0 +1,1 @@
+t29: a static library, an object library and a program import `<compare>`, `<format>` and `<string>` and odr-use static data members that MSVC defines only in a header unit's object file (`std::strong_ordering::less`, `<format>`'s precision tables): every kind of consumer links.

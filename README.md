@@ -347,10 +347,15 @@ scheme):
 
 **MSVC with Ninja** (`cmake/HeaderUnits/MSVCNinja.cmake`):
 
-* A header unit is identified by the header's resolved path. Its IFC is built with `/exportHeader /ifcOnly` and written
-  as the set's object file (`/ifcOutput`), so it is a real Ninja output. Source properties are per directory, so a
-  header in two sets of one directory shares its options: `/ifcOutput` names the set's directory as
-  `$<TARGET_PROPERTY:NAME>`, and the second set reuses the first one's object name.
+* A header unit is identified by the header's resolved path. It is built with `/exportHeader` into the set's object
+  file and an IFC next to it (`/ifcOutput`), declared as a further output of that compile (`OBJECT_OUTPUTS`), so the IFC
+  is a real Ninja output. The object holds definitions that importers reference but do not emit (static data members
+  such as `std::strong_ordering::less`, `<format>`'s precision tables), so every target that imports a set gets the
+  objects of its header units as sources (an object library passes them on through `INTERFACE_SOURCES`). Source
+  properties are per directory, so a header in two sets of one directory shares its options, and `OBJECT_OUTPUTS`
+  cannot name a file per target: for that header both sets build only the IFC (`/exportHeader /ifcOnly`), written as
+  the set's object file (`/ifcOutput` names the set's directory as `$<TARGET_PROPERTY:NAME>`), and the second set
+  reuses the first one's object name.
 * Ninja leaves headers under "Program Files" or "Microsoft Visual Studio" out of its dependency records, so it sees no
   header of the C++ library or the Windows SDK. Each IFC therefore also depends on the compiler and on a file in the
   build directory that records the compiler, its version and the `INCLUDE` environment variable; a CMake run rewrites
@@ -426,9 +431,10 @@ scheme):
   the BMI unless it removes that option. Delete the BMI afterwards, so the next build makes it again.
 * MSVC:
   * MSBuild does not translate `#include` into imports in this setup (with Ninja the module does);
+  * with Ninja, a header in two sets of one directory has no object file there (only its IFC, see How it works): an
+    importer that odr-uses a static data member it defines (`std::strong_ordering::less`) does not link;
   * fmt 10.1.1 header-only does not link through a header unit with MSVC 19.44, built by MSBuild or by this module
-    (`format_facet<std::locale>::do_put` unresolved; see Tests); it links with MSVC 19.52 (Visual Studio 2026), where
-    t02_thirdparty fails some of the time on another symbol instead (`std::strong_ordering::less` unresolved);
+    (`format_facet<std::locale>::do_put` unresolved; see Tests); it links with MSVC 19.52 (Visual Studio 2026);
   * with MSVC 19.44 (Visual Studio 2022) and Ninja, a build directory with a character outside the ANSI code page fails
     the configure's header-lookup self-check: cl prints `/showIncludes` in the ANSI code page (19.52 in UTF-8), where it becomes `?` (characters in it, e.g. "é", work;
     the module writes its response files with a UTF-8 byte order mark, which cl then reads as UTF-8). In a non-ASCII
@@ -453,7 +459,7 @@ cmake/HeaderUnits/GCC.cmake      GCC strategy
 cmake/HeaderUnits/Clang.cmake    Clang strategy
 cmake/HeaderUnits/MSVC.cmake     MSVC with a Visual Studio generator: pass-through
 cmake/HeaderUnits/MSVCNinja.cmake  MSVC strategy with Ninja
-tests/t01..t28/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
+tests/t01..t29/                  test projects; tests/run_suite.cmake is the driver, tests/run_parallel.cmake runs its
                                  tests in parallel (CTest)
 tools/update_release_branch.cmake  makes the next commit of the `release` branch from a commit of main (see Release branch)
 tools/release-README.md          the `release` branch's README
@@ -513,6 +519,7 @@ Each test is a standalone CMake project with a one-line README:
 | t26_shared_targets | one source compiled by a target that imports a set and, in another directory, by one that does not: a clean build of only the second builds no header unit and keeps the `#include` textual (depfile), also after an edit of the header |
 | t27_module_two_targets | one module interface source (importing `<vector>`) compiled by two targets of one directory, each imported by a program without header units of its own: both programs build and run (with MSVC each module target's importers need its header-unit mappings) |
 | t28_cxx_sources | which sources are a target's C++ sources, by one rule for the scan and the header units: a module unit in the default `CXX_MODULES` file set, a build-directory source listed by a relative path (also named in `target_header_units_scan_sources` and `target_import_header_units` `SOURCES`) and a `.c` file with `LANGUAGE CXX` are scanned and get header units; a `HEADER_FILE_ONLY` source is not scanned; generator-expression sources (a configuration's source, `$<TARGET_OBJECTS:...>`) are skipped |
+| t29_hu_objects | a static library, an object library and a program import `<compare>`, `<format>` and `<string>` and odr-use static data members that MSVC defines only in a header unit's object file (`std::strong_ordering::less`, `<format>`'s precision tables): every kind of consumer links |
 
 For each test, `tests/run_suite.cmake` runs:
 

@@ -102,7 +102,7 @@ if(CMAKE_HOST_WIN32)
 else()
   set(EXE "")
 endif()
-set(ALL_TESTS t01_stl t02_thirdparty t03_named_modules t04_shared_set t05_rebuild t06_mixed t07_own_headers t08_auto t09_header_import_error t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma t15_scan_sources t16_deferred t17_lookup t18_spelling t19_scale t20_wrong_file t21_self_include t22_import_std t23_multi_config t24_two_sets t25_shared_source t26_shared_targets t27_module_two_targets t28_cxx_sources)
+set(ALL_TESTS t01_stl t02_thirdparty t03_named_modules t04_shared_set t05_rebuild t06_mixed t07_own_headers t08_auto t09_header_import_error t10_header_imports t11_transitive t12_build_tree t13_same_name t14_textual_pragma t15_scan_sources t16_deferred t17_lookup t18_spelling t19_scale t20_wrong_file t21_self_include t22_import_std t23_multi_config t24_two_sets t25_shared_source t26_shared_targets t27_module_two_targets t28_cxx_sources t29_hu_objects)
 if(NOT TESTS)
   set(TESTS ${ALL_TESTS})
 endif()
@@ -1849,6 +1849,14 @@ function(test_t27_module_two_targets bdir)
   evid("one module interface source in two targets of one directory: the importers of both targets build and run")
 endfunction()
 
+function(test_t29_hu_objects bdir)
+  hu_configure(t29_hu_objects "${bdir}")
+  bail_if_failed()
+  hu_build_check(t29_hu_objects "${bdir}")
+  bail_if_failed()
+  evid("a static library, an object library and a program odr-use std::strong_ordering's members and <format>'s precision tables through header units: links and runs")
+endfunction()
+
 # A target's C++ sources (t28), one rule for the scan and the header units: each source imports a header no other
 # source imports, so one not scanned or not given the header units fails the build; a HEADER_FILE_ONLY source would
 # bring a header that does not compile.
@@ -1891,10 +1899,8 @@ foreach(t IN LISTS TESTS)
     set(known TRUE)
   endif()
   # MSVC: fmt 10.1.1 header-only does not link through a header unit (as with MSBuild): format_facet::do_put.  Fixed in
-  # MSVC 19.52 (Visual Studio 2026, toolset 14.52: links in CI); still so with 19.44 (toolset 14.44).  With 19.52, t02
-  # fails some of the time on another symbol, std::strong_ordering::less unresolved (CI, 2026-11-20).
-  if(TC STREQUAL "msvc" AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$"
-     AND ("$ENV{VCToolsVersion}" VERSION_LESS 14.50 OR name STREQUAL "t02_thirdparty"))
+  # MSVC 19.52 (Visual Studio 2026, toolset 14.52: links in CI); still so with 19.44 (toolset 14.44).
+  if(TC STREQUAL "msvc" AND "$ENV{VCToolsVersion}" VERSION_LESS 14.50 AND name MATCHES "^(t02_thirdparty|t08_auto|t11_transitive)$")
     set(known TRUE)
   endif()
   if(sk AND NOT f)
