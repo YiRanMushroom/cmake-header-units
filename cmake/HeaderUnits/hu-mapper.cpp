@@ -200,8 +200,8 @@ std::string lookup(const std::string& index, const std::string& source, const st
   return found;
 }
 
-// The source of a compile, for "-c <modmap> <index>": GCC splits its mapper option at blanks, with no quoting, so the
-// source cannot be an argument when its path has a blank.  CMAKE-INTERNAL (observed): CMake's scan of the compile writes
+// The source of a compile, for "-c <modmap> <index>": GCC splits its mapper option at blanks, and the compile rule
+// cannot quote Ninja's $in for it, so the source cannot be an argument when its path has a blank.  CMAKE-INTERNAL (observed): CMake's scan of the compile writes
 // the depfile "<object>.ddi.d" (the modmap is "<object>.modmap"), whose first prerequisite is the source as the compile
 // gets it (Ninja's $in), escaped as in a Makefile ("\ ", "\#", "$$").  Ninja keeps that depfile (the scan rule has no
 // "deps"), and the scan runs before the compile.  "" when it cannot be read: no header-unit map.
