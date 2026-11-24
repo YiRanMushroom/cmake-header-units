@@ -311,12 +311,15 @@ defined before the include take effect. Use it for the one source of an stb-styl
   needs no header unit. Sources with the same content share one map (`gcc-m/<hash>.map`).
 * CMake's internal `CMAKE_CXX_MODULE_MAP_FLAG` is overridden so the compile serves CMake's named-module map and the
   header-unit map together: GCC starts `hu-mapper -c <module map> <index>`, which reads both and finds the source's
-  map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. GCC splits that option at blanks, with no
-  quoting, so `hu-mapper` and its files are named relative to the top build directory (the working directory of every
-  Ninja command), and the source is not on it: `hu-mapper` reads it from the scan's depfile next to the module map
-  (`<object>.ddi.d`, its first prerequisite). No shell or `cmd.exe` runs in between, so paths may hold `, ; =`, blanks
-  and the like; `hu-mapper` reads its map entries quoted as in GCC's protocol. Only the object directory of a target
-  (its binary directory below the build tree) may not hold blanks: it is part of the module map's path.
+  map in `hu-index.txt`; the dependency scan uses `hu-mapper -s <map>`. GCC splits that option into words at blanks,
+  honouring quotes. The options of a header unit's own compile and of the scan, which IDEs such as CLion also run from
+  another working directory to read compiler information, name `hu-mapper` and the map by absolute path, quoted when
+  the path has a blank. The compile rule names `hu-mapper` and the index relative to the top build directory (the
+  working directory of every Ninja command), and the source is not on it (Ninja's `$in` cannot be quoted there):
+  `hu-mapper` reads it from the scan's depfile next to the module map (`<object>.ddi.d`, its first prerequisite). No
+  shell or `cmd.exe` runs in between, so paths may hold `, ; =`, blanks and the like; `hu-mapper` reads its map
+  entries quoted as in GCC's protocol. Only the object directory of a target (its binary directory below the build
+  tree) may not hold blanks: it is part of the module map's path.
 * Headers inside the build tree (FetchContent dependencies, `configure_file` headers) need nothing special: `hu-mapper`
   answers the export whatever name GCC uses (CMake passes such a source relative to the build directory).
 * Without `hu-mapper` (cross-compiling without a host compiler, or `HU_GCC_WRAPPERS`), consumers use GCC's

@@ -222,7 +222,7 @@ function(hu_bmis_of_flags out f)
   if(f MATCHES "header_units/gcc-m/[^ \"']+\\.map")
     string(REGEX MATCH "[^ \"'|]+/header_units/gcc-m/[^ \"']+\\.map" m "${f}")
     if(NOT IS_ABSOLUTE "${m}")
-      set(m "${bdir}/${m}")                             # hu-mapper's files are named relative to the top build dir
+      set(m "${bdir}/${m}")                             # a map named relative to the top build dir
     endif()
     file(STRINGS "${m}" ml)
     foreach(l IN LISTS ml)
@@ -516,8 +516,9 @@ function(test_t01_stl bdir)
 endfunction()
 
 # Source and build directories with a blank in their names, and a source in a subdirectory with one (its object path
-# has "_" there), with target_auto_header_units: with GCC, hu-mapper and its files are named relative to the build
-# directory and the compile's source is read from the scan's depfile (GCC splits its mapper option at blanks).
+# has "_" there), with target_auto_header_units: with GCC, the header-unit and scan options name hu-mapper and its map
+# by absolute path, quoted, the compile rule names them relative to the build directory, and the compile's source is
+# read from the scan's depfile (GCC splits its mapper option at blanks).
 # Depfile evidence: both sources read <vector> from its BMI.
 function(t01_blank_dirs)
   set(top "${ROOT}/t01 blank")
@@ -1271,8 +1272,9 @@ function(test_t16_deferred bdir)
   evid("commands before the target's settings: link library, include dirs, directory definition and -ffast-math//fp:fast all reach the header units; a later change from the parent directory is reported")
 endfunction()
 
-# An IDE (CLion) runs each source's flags without -M and with -E to read the compiler's settings: that must work for
-# the header-unit sources of <set> too.  Appends to the evidence how many were checked.
+# An IDE (CLion) runs each source's flags without -M and with -E to read the compiler's settings, from a working
+# directory of its own: that must work for the header-unit sources of <set> too (run here from ${ROOT}, outside the
+# build tree).  Appends to the evidence how many were checked.
 function(ide_probe_check bdir set)
   if(TC STREQUAL "msvc")
     evid("IDE-style probe: not run with MSVC (GCC/Clang -E syntax)")
@@ -1301,7 +1303,7 @@ function(ide_probe_check bdir set)
     elseif(in AND l STREQUAL "")
       set(in FALSE)
       separate_arguments(args NATIVE_COMMAND "${v_DEFINES} ${v_INCLUDES} ${v_FLAGS}")
-      run(rc out "${bdir}" "${cxx}" ${args} -E "${bdir}/ide_probe.cpp" -o "${bdir}/ide_probe.i")
+      run(rc out "${ROOT}" "${cxx}" ${args} -E "${bdir}/ide_probe.cpp" -o "${bdir}/ide_probe.i")
       if(NOT rc EQUAL 0)
         first_lines(e "${out}" 3)
         fail("an IDE-style probe (header-unit flags, -E, no -M) fails: ${e}")
